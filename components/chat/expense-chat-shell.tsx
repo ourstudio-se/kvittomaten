@@ -87,6 +87,7 @@ export function ExpenseChatShell() {
 
   const [collectedReceipts, setCollectedReceipts] = useState<CollectedReceipt[]>([])
   const collectedReceiptsRef = useRef<CollectedReceipt[]>([])
+  const receiptImageRef = useRef<File | null>(null)
 
   const extractedRef = useRef<ExtractedReceipt>({})
 
@@ -134,6 +135,7 @@ export function ExpenseChatShell() {
     collectedReceiptsRef.current = []
     setCollectedReceipts([])
     extractedRef.current = {}
+    receiptImageRef.current = null
   }, [clearAttachment])
 
   const showSuggestions = useCallback((opts: string[], action: (value: string) => void) => {
@@ -468,6 +470,7 @@ export function ExpenseChatShell() {
 
     if (attachedFile) {
       const file = attachedFile
+      receiptImageRef.current = new File([file], file.name, { type: file.type })
       setPrompt("")
       clearAttachment()
       void startScanFlow(file)
@@ -535,27 +538,46 @@ export function ExpenseChatShell() {
     })
 
     const totalDelay = 800 + initialSteps.length * 900 + 400
-    setTimeout(() => {
-      const count = receipts.length
-      const lines = receipts
-        .map((r, i) => {
-          const header = r.fields.find((f) => f.label === "Leverantör")?.value ?? `Kvitto ${i + 1}`
-          return `${i + 1}. ${header}\n${r.fields.map((f) => `   ${f.label}: ${f.value}`).join("\n")}`
+    setTimeout(async () => {
+      try {
+        const formData = new FormData()
+        formData.append("receipts", JSON.stringify(receipts))
+        if (receiptImageRef.current) {
+          formData.append("image", receiptImageRef.current)
+        }
+
+        const res = await fetch("/api/receipt/pdf", {
+          method: "POST",
+          body: formData,
         })
-        .join("\n\n")
-      const blob = new Blob([`Sammanställd utläggsrapport (${count} kvitton)\n\n${lines}\n`], {
-        type: "application/pdf",
-      })
-      const filename = count === 1 ? "utlagg.pdf" : `utlagg-sammanstallning-${count}-kvitton.pdf`
-      addMessage({
-        id: uid(),
-        role: "assistant",
-        type: "download",
-        filename,
-        blobUrl: URL.createObjectURL(blob),
-      })
+
+        if (!res.ok) {
+          throw new Error(`PDF generation failed (${res.status})`)
+        }
+
+        const blob = await res.blob()
+        const count = receipts.length
+        const filename = count === 1 ? "verifikation.pdf" : `verifikation-${count}-kvitton.pdf`
+
+        addMessage({
+          id: uid(),
+          role: "assistant",
+          type: "download",
+          filename,
+          blobUrl: URL.createObjectURL(blob),
+        })
+      } catch (err) {
+        addMessage({
+          id: uid(),
+          role: "assistant",
+          type: "text",
+          body: `Kunde inte generera PDF: ${err instanceof Error ? err.message : "Okänt fel"}`,
+        })
+      }
+
       collectedReceiptsRef.current = []
       setCollectedReceipts([])
+      receiptImageRef.current = null
     }, totalDelay)
   }, [addMessage])
 
