@@ -84,6 +84,20 @@ function shouldRouteToIntent(
   return false
 }
 
+const INTRO_MESSAGE_BODY =
+  "Hej! Lägg till eller fotografera ditt kvitto här i chatten så hjälper jag dig att generera en korrekt pdf."
+
+function makeIntroMessages(): ExpenseMessage[] {
+  return [
+    {
+      id: "intro",
+      role: "assistant",
+      type: "text",
+      body: INTRO_MESSAGE_BODY,
+    },
+  ]
+}
+
 const GENERATION_STEPS: GeneratingStep[] = [
   { label: "Sammanställer uppgifter", status: "pending" },
   { label: "Formaterar kvittodokument", status: "pending" },
@@ -92,7 +106,7 @@ const GENERATION_STEPS: GeneratingStep[] = [
 
 export function ExpenseChatShell() {
   const [prompt, setPrompt] = useState("")
-  const [messages, setMessages] = useState<ExpenseMessage[]>([])
+  const [messages, setMessages] = useState<ExpenseMessage[]>(() => makeIntroMessages())
   const [participants, setParticipants] = useState("")
   const [participantMessageId, setParticipantMessageId] = useState<string | null>(null)
   const [attachedFile, setAttachedFile] = useState<File | null>(null)
@@ -142,7 +156,7 @@ export function ExpenseChatShell() {
   }, [attachedPreviewUrl])
 
   const handleNewChat = useCallback(() => {
-    setMessages([])
+    setMessages(makeIntroMessages())
     setParticipants("")
     setParticipantMessageId(null)
     clearAttachment()
