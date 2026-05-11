@@ -1,5 +1,5 @@
-import { ChatPanel } from "@/components/chat/ChatPanel"
+import { ExpenseChatShell } from "@/components/chat/expense-chat-shell"
 
 export default function Home() {
-  return <ChatPanel />
+  return <ExpenseChatShell />
 }
