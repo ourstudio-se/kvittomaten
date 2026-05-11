@@ -26,6 +26,7 @@ export function FloatingNav({ onNewChat, receipts = [], onGeneratePdf }: Floatin
       </Button>
 
       {count > 0 && (
+        <>
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
             <Button variant="outline" className="gap-2 text-sm" aria-label={`${count} inlagda kvitton`}>
@@ -64,6 +65,17 @@ export function FloatingNav({ onNewChat, receipts = [], onGeneratePdf }: Floatin
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
+        {onGeneratePdf && (
+          <Button
+            variant="outline"
+            className="text-sm"
+            onClick={onGeneratePdf}
+            aria-label="Generera PDF"
+          >
+            Generera PDF
+          </Button>
+        )}
+        </>
       )}
     </div>
   )
