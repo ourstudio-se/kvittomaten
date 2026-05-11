@@ -29,7 +29,6 @@ export const INITIAL_SCAN_FIELDS: ScanField[] = [
   { label: "Datum", status: "pending" },
   { label: "Belopp", status: "pending" },
   { label: "Kategori", status: "pending" },
-  { label: "Syfte", status: "pending" },
   { label: "Deltagare", status: "pending" },
 ]
 
@@ -38,7 +37,6 @@ export const SCANNED_FIELDS: ScanField[] = [
   { label: "Datum", status: "found", value: "2026-05-03" },
   { label: "Belopp", status: "found", value: "1 240 SEK" },
   { label: "Kategori", status: "missing" },
-  { label: "Syfte", status: "missing" },
   { label: "Deltagare", status: "missing" },
 ]
 
