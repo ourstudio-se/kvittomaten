@@ -690,7 +690,7 @@ export function ExpenseChatShell() {
 
   return (
     <main
-      className="grain min-h-screen overflow-hidden bg-background"
+      className="grain min-h-dvh overflow-hidden bg-background"
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -706,13 +706,13 @@ export function ExpenseChatShell() {
           </div>
         </div>
       )}
-      <div className="relative flex h-screen flex-col overflow-hidden">
+      <div className="relative flex h-dvh flex-col overflow-hidden">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-primary/12 to-transparent" />
 
         <section className="relative flex min-h-0 flex-1 flex-col">
           <div className="flex min-h-0 flex-1">
             <ChatContainerRoot className="h-full w-full">
-              <ChatContainerContent className="mx-auto w-full max-w-[800px] space-y-between-cards px-screen-edge pt-10 pb-32 lg:px-8">
+              <ChatContainerContent className="mx-auto w-full max-w-[800px] space-y-between-cards px-screen-edge pt-10 pb-44 lg:px-8 lg:pb-32">
                   {messages.map((message) => {
                     if (message.type === "text") {
                       return (
@@ -848,7 +848,7 @@ export function ExpenseChatShell() {
 
           <div className="pointer-events-none fixed inset-x-0 bottom-0 h-40 bg-gradient-to-t from-background via-background/92 to-transparent" />
 
-          <footer className="fixed inset-x-0 bottom-0 px-screen-edge pb-6 lg:px-8">
+          <footer className="fixed inset-x-0 bottom-0 px-screen-edge pb-[max(1.5rem,env(safe-area-inset-bottom))] lg:px-8">
             <div className="mx-auto max-w-[800px]">
               {suggestions.length > 0 && (
                 <div className="relative mb-2">
