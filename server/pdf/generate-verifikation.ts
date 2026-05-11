@@ -127,12 +127,27 @@ export async function generateVerifikationPdf(
           .font("Helvetica-Bold")
           .text(`${field.label}:`, PAGE_MARGIN, y, { width: LABEL_WIDTH })
 
-        const valueHeight = doc.heightOfString(field.value, { width: VALUE_WIDTH })
-        doc
-          .font("Helvetica")
-          .text(field.value, VALUE_X, y, { width: VALUE_WIDTH })
+        if (field.label === "Inkluderade rader") {
+          const lines = field.value.split("\n")
+          for (const line of lines) {
+            const lineHeight = doc.heightOfString(line, { width: VALUE_WIDTH })
+            doc
+              .font("Helvetica")
+              .text(line, VALUE_X, y, { width: VALUE_WIDTH })
+            y += Math.max(16, lineHeight + 4)
 
-        y += Math.max(16, valueHeight + 4)
+            if (y > A4_HEIGHT - 80) {
+              doc.addPage()
+              y = PAGE_MARGIN
+            }
+          }
+        } else {
+          const valueHeight = doc.heightOfString(field.value, { width: VALUE_WIDTH })
+          doc
+            .font("Helvetica")
+            .text(field.value, VALUE_X, y, { width: VALUE_WIDTH })
+          y += Math.max(16, valueHeight + 4)
+        }
       }
 
       y += 10
