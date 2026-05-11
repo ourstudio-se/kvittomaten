@@ -180,21 +180,7 @@ export function ExpenseChatShell() {
 
   const askForParticipants = useCallback(
     (category: string) => {
-      const isIntern = category === "Representation, intern"
-      const isExtern = category === "Representation, extern"
-
-      if (isIntern) {
-        addMessage({
-          id: uid(),
-          role: "assistant",
-          type: "text",
-          body: "Vilka interna deltagare var med? Välj ur listan.",
-        })
-        setChipMode(true)
-        setSelectedChips([])
-        showSuggestions(EMPLOYEES, () => {})
-        setPendingAction(() => (value: string) => handleParticipantInput(value, category))
-      } else if (isExtern) {
+      if (category === "Representation, extern") {
         addMessage({
           id: uid(),
           role: "assistant",
@@ -202,7 +188,19 @@ export function ExpenseChatShell() {
           body: "Ange externa deltagare (namn och företag):",
         })
         showSuggestions([], (value) => handleParticipantInput(value, category))
+        return
       }
+
+      const body =
+        category === "Representation, intern"
+          ? "Vilka interna deltagare var med? Välj ur listan."
+          : "Vilka var med på utlägget? Välj ur listan eller skriv egna namn."
+
+      addMessage({ id: uid(), role: "assistant", type: "text", body })
+      setChipMode(true)
+      setSelectedChips([])
+      showSuggestions(EMPLOYEES, () => {})
+      setPendingAction(() => (value: string) => handleParticipantInput(value, category))
     },
     [addMessage, showSuggestions, handleParticipantInput]
   )
@@ -258,16 +256,18 @@ export function ExpenseChatShell() {
         return
       }
 
-      const needsParticipants =
-        (category === "Representation, intern" ||
-          category === "Representation, extern") &&
-        !deltagare
-      if (needsParticipants) {
+      const isRepr =
+        category === "Representation, intern" ||
+        category === "Representation, extern"
+
+      // Always ask for representation receipts (extracted deltagare on receipts
+      // is unreliable). For other categories, only ask when deltagare is missing.
+      if (isRepr || !deltagare) {
         askForParticipants(category)
         return
       }
 
-      showSummary(category, deltagare ?? "–")
+      showSummary(category, deltagare)
     },
     [addMessage, showSuggestions, handleCategoryInput, askForParticipants, showSummary]
   )
