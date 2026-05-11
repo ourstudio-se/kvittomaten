@@ -44,7 +44,6 @@ type ExtractedReceipt = {
   datum?: string
   belopp?: string
   kategori?: string
-  syfte?: string
   deltagare?: string
 }
 
@@ -53,7 +52,6 @@ const SCAN_FIELD_KEYS: { label: string; key: keyof ExtractedReceipt }[] = [
   { label: "Datum", key: "datum" },
   { label: "Belopp", key: "belopp" },
   { label: "Kategori", key: "kategori" },
-  { label: "Syfte", key: "syfte" },
   { label: "Deltagare", key: "deltagare" },
 ]
 
@@ -70,8 +68,6 @@ const GENERATION_STEPS: GeneratingStep[] = [
   { label: "Formaterar kvittodokument", status: "pending" },
   { label: "Genererar PDF", status: "pending" },
 ]
-
-const REPR_CATEGORIES = ["Representation, intern", "Representation, extern"]
 
 export function ExpenseChatShell() {
   const [prompt, setPrompt] = useState("")
@@ -173,14 +169,12 @@ export function ExpenseChatShell() {
   const showSummary = useCallback(() => {
     const e = extractedRef.current
     const category = e.kategori ?? "Övrigt"
-    const isRepr = REPR_CATEGORIES.includes(category)
 
     const fields: { label: string; value: string }[] = []
     if (e.leverantor) fields.push({ label: "Leverantör", value: e.leverantor })
     if (e.datum) fields.push({ label: "Datum", value: e.datum })
     if (e.belopp) fields.push({ label: "Belopp", value: e.belopp })
     fields.push({ label: "Kategori", value: category })
-    if (e.syfte && !isRepr) fields.push({ label: "Syfte", value: e.syfte })
     if (e.deltagare) fields.push({ label: "Deltagare", value: e.deltagare })
 
     addMessage({ id: uid(), role: "assistant", type: "summary", fields })
@@ -192,16 +186,11 @@ export function ExpenseChatShell() {
     const acceptAnswer = (
       key: keyof ExtractedReceipt,
       displayValue: string,
-      storedValue: string,
-      extraUpdates?: Partial<ExtractedReceipt>
+      storedValue: string
     ) => {
       addMessage({ id: uid(), role: "user", type: "text", body: displayValue })
       clearSuggestions()
-      extractedRef.current = {
-        ...extractedRef.current,
-        [key]: storedValue,
-        ...extraUpdates,
-      }
+      extractedRef.current = { ...extractedRef.current, [key]: storedValue }
       pushProgressCard()
       setTimeout(next, 400)
     }
@@ -222,8 +211,9 @@ export function ExpenseChatShell() {
         if (CATEGORIES.includes(raw)) {
           acceptAnswer("kategori", raw, raw)
         } else {
-          // Free-text → Övrigt with raw as syfte (so we don't re-ask syfte)
-          acceptAnswer("kategori", `Övrigt – ${raw}`, "Övrigt", { syfte: raw })
+          // Free-text → store as Övrigt with the typed description as suffix
+          const label = `Övrigt – ${raw}`
+          acceptAnswer("kategori", label, label)
         }
       })
     }
@@ -255,8 +245,6 @@ export function ExpenseChatShell() {
       const e = extractedRef.current
       for (const entry of SCAN_FIELD_KEYS) {
         if (e[entry.key]) continue
-        // Syfte isn't shown in the summary for Representation, so don't prompt.
-        if (entry.key === "syfte" && REPR_CATEGORIES.includes(e.kategori ?? "")) continue
 
         switch (entry.key) {
           case "leverantor":
@@ -270,9 +258,6 @@ export function ExpenseChatShell() {
             return
           case "kategori":
             promptKategori()
-            return
-          case "syfte":
-            promptText("syfte", "Beskriv kort syftet med utlägget:")
             return
           case "deltagare":
             promptDeltagare()

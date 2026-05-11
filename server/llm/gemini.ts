@@ -20,7 +20,6 @@ export type ExtractedReceipt = {
   datum?: string
   belopp?: string
   kategori?: string
-  syfte?: string
   deltagare?: string
 }
 
@@ -60,31 +59,18 @@ const RECEIPT_SCHEMA: Schema = {
       type: Type.STRING,
       description: `Endast om du kan avgöra med hög säkerhet, välj exakt en av: ${RECEIPT_CATEGORIES.join(", ")}. Annars tom sträng.`,
     },
-    syfte: {
-      type: Type.STRING,
-      description:
-        "Kort syfte (max 80 tecken) om det går att härleda från kvittot, annars tom sträng.",
-    },
     deltagare: {
       type: Type.STRING,
       description:
         "Eventuella deltagare som anges på kvittot. Sällan på kvitton – lämna tom sträng om okänt.",
     },
   },
-  required: [
-    "leverantor",
-    "datum",
-    "belopp",
-    "kategori",
-    "syfte",
-    "deltagare",
-  ],
+  required: ["leverantor", "datum", "belopp", "kategori", "deltagare"],
   propertyOrdering: [
     "leverantor",
     "datum",
     "belopp",
     "kategori",
-    "syfte",
     "deltagare",
   ],
 }
@@ -115,7 +101,6 @@ function validateExtracted(raw: unknown): ExtractedReceipt {
   ) {
     out.kategori = r.kategori.trim()
   }
-  if (isNonEmptyString(r.syfte)) out.syfte = r.syfte.trim().slice(0, 200)
   if (isNonEmptyString(r.deltagare)) out.deltagare = r.deltagare.trim()
 
   return out
