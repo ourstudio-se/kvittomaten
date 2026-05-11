@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/prompt-input"
 import { PromptSuggestion } from "@/components/ui/prompt-suggestion"
 import { ScrollButton } from "@/components/ui/scroll-button"
+import { Loader } from "@/components/ui/loader"
 import { ScanningCard } from "@/components/ui/scanning-card"
 import { SummaryCard } from "@/components/ui/summary-card"
 import {
@@ -135,6 +136,7 @@ export function ExpenseChatShell() {
   const [selectedChips, setSelectedChips] = useState<string[]>([])
   const [generatingSteps, setGeneratingSteps] = useState<GeneratingStep[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
+  const [isThinking, setIsThinking] = useState(false)
 
   const [collectedReceipts, setCollectedReceipts] = useState<CollectedReceipt[]>([])
   const collectedReceiptsRef = useRef<CollectedReceipt[]>([])
@@ -201,6 +203,7 @@ export function ExpenseChatShell() {
     receiptImagesRef.current = []
     pendingReceiptImageRef.current = null
     setIsProcessing(false)
+    setIsThinking(false)
   }, [clearAttachment])
 
   const [activeChipIndex, setActiveChipIndex] = useState(-1)
@@ -567,7 +570,8 @@ export function ExpenseChatShell() {
   const streamFreeTextReply = useCallback(
     async (userPrompt: string) => {
       const replyId = uid()
-      addMessage({ id: replyId, role: "assistant", type: "text", body: "" })
+      let messageAdded = false
+      setIsThinking(true)
 
       try {
         const res = await fetch("/api/chat", {
@@ -584,13 +588,34 @@ export function ExpenseChatShell() {
           const { value, done } = await reader.read()
           if (done) break
           acc += decoder.decode(value, { stream: true })
-          updateTextMessage(replyId, acc)
+          if (!messageAdded) {
+            setIsThinking(false)
+            addMessage({ id: replyId, role: "assistant", type: "text", body: acc })
+            messageAdded = true
+          } else {
+            updateTextMessage(replyId, acc)
+          }
         }
         acc += decoder.decode()
-        if (acc) updateTextMessage(replyId, acc)
+        if (!messageAdded) {
+          setIsThinking(false)
+          addMessage({ id: replyId, role: "assistant", type: "text", body: acc })
+        } else if (acc) {
+          updateTextMessage(replyId, acc)
+        }
       } catch (err) {
         console.error("chat stream error", err)
-        updateTextMessage(replyId, "Något gick fel hos assistenten. Försök igen.")
+        setIsThinking(false)
+        if (!messageAdded) {
+          addMessage({
+            id: replyId,
+            role: "assistant",
+            type: "text",
+            body: "Något gick fel hos assistenten. Försök igen.",
+          })
+        } else {
+          updateTextMessage(replyId, "Något gick fel hos assistenten. Försök igen.")
+        }
       }
     },
     [addMessage, updateTextMessage]
@@ -695,6 +720,7 @@ export function ExpenseChatShell() {
       addMessage({ id: uid(), role: "user", type: "text", body: message })
 
       let actions: IntentAction[] = [{ action: "off_topic" }]
+      setIsThinking(true)
       try {
         const res = await fetch("/api/edit-receipt", {
           method: "POST",
@@ -714,6 +740,8 @@ export function ExpenseChatShell() {
         }
       } catch (err) {
         console.error("intent error", err)
+      } finally {
+        setIsThinking(false)
       }
 
       // Cancel always wins.
@@ -1199,6 +1227,20 @@ export function ExpenseChatShell() {
 
                     return null
                   })}
+
+                  {isThinking && (
+                    <Message>
+                      <MessageAvatar
+                        src="/WesterAI.png"
+                        alt="AI"
+                        fallback="AI"
+                        className="mt-1 h-8 w-8 border border-border/70 bg-secondary text-secondary-foreground"
+                      />
+                      <div className="flex items-center px-1 py-2 text-muted-foreground">
+                        <Loader variant="terminal" />
+                      </div>
+                    </Message>
+                  )}
 
                   {suggestions.length > 0 && <div aria-hidden className="h-[65vh]" />}
                   <ChatContainerScrollAnchor />
