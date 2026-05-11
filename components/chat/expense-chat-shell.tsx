@@ -43,6 +43,8 @@ type ExtractedReceipt = {
   leverantor?: string
   datum?: string
   belopp?: string
+  valuta?: string
+  belopp_sek?: string
   kategori?: string
   syfte?: string
   deltagare?: string
@@ -52,6 +54,8 @@ const SCAN_FIELD_KEYS: { label: string; key: keyof ExtractedReceipt }[] = [
   { label: "Leverantör", key: "leverantor" },
   { label: "Datum", key: "datum" },
   { label: "Belopp", key: "belopp" },
+  { label: "Valuta", key: "valuta" },
+  { label: "Belopp (SEK)", key: "belopp_sek" },
   { label: "Kategori", key: "kategori" },
   { label: "Syfte", key: "syfte" },
   { label: "Deltagare", key: "deltagare" },
@@ -84,10 +88,11 @@ export function ExpenseChatShell() {
   const [chipMode, setChipMode] = useState(false)
   const [selectedChips, setSelectedChips] = useState<string[]>([])
   const [generatingSteps, setGeneratingSteps] = useState<GeneratingStep[]>([])
+  const [isProcessing, setIsProcessing] = useState(false)
 
   const [collectedReceipts, setCollectedReceipts] = useState<CollectedReceipt[]>([])
   const collectedReceiptsRef = useRef<CollectedReceipt[]>([])
-  const receiptImageRef = useRef<File | null>(null)
+  const receiptImagesRef = useRef<File[]>([])
 
   const extractedRef = useRef<ExtractedReceipt>({})
 
@@ -135,7 +140,8 @@ export function ExpenseChatShell() {
     collectedReceiptsRef.current = []
     setCollectedReceipts([])
     extractedRef.current = {}
-    receiptImageRef.current = null
+    receiptImagesRef.current = []
+    setIsProcessing(false)
   }, [clearAttachment])
 
   const showSuggestions = useCallback((opts: string[], action: (value: string) => void) => {
@@ -158,7 +164,15 @@ export function ExpenseChatShell() {
       const fields: { label: string; value: string }[] = []
       if (e.leverantor) fields.push({ label: "Leverantör", value: e.leverantor })
       if (e.datum) fields.push({ label: "Datum", value: e.datum })
-      if (e.belopp) fields.push({ label: "Belopp", value: e.belopp })
+
+      const isForeign = e.valuta && e.valuta !== "SEK"
+      if (isForeign && e.belopp) {
+        fields.push({ label: "Originalbelopp", value: e.belopp })
+        if (e.belopp_sek) fields.push({ label: "Belopp (SEK)", value: e.belopp_sek })
+      } else if (e.belopp) {
+        fields.push({ label: "Belopp", value: e.belopp })
+      }
+
       fields.push({ label: "Kategori", value: category })
       if (e.syfte && !["Representation, intern", "Representation, extern"].includes(category)) {
         fields.push({ label: "Syfte", value: e.syfte })
@@ -299,6 +313,7 @@ export function ExpenseChatShell() {
 
   const startScanFlow = useCallback(
     async (file: File) => {
+      setIsProcessing(true)
       const scanId = uid()
       const initialFields = INITIAL_SCAN_FIELDS.map((f) => ({ ...f }))
       setScanFields(initialFields)
@@ -323,6 +338,7 @@ export function ExpenseChatShell() {
           type: "text",
           body: "Jag kunde inte läsa kvittot. Försök ladda upp en tydligare bild.",
         })
+        setIsProcessing(false)
         return
       }
 
@@ -380,17 +396,19 @@ export function ExpenseChatShell() {
       e.preventDefault()
       dragDepthRef.current = 0
       setIsDragging(false)
+      if (isProcessing) return
       const file = e.dataTransfer.files?.[0]
       if (!file) return
       acceptFile(file)
     },
-    [acceptFile]
+    [acceptFile, isProcessing]
   )
 
   // --- Paste ---
 
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
+      if (isProcessing) return
       const items = e.clipboardData?.items
       if (!items) return
       for (const item of items) {
@@ -405,7 +423,7 @@ export function ExpenseChatShell() {
     }
     window.addEventListener("paste", onPaste)
     return () => window.removeEventListener("paste", onPaste)
-  }, [acceptFile])
+  }, [acceptFile, isProcessing])
 
   // --- Free-text chat ---
 
@@ -470,7 +488,7 @@ export function ExpenseChatShell() {
 
     if (attachedFile) {
       const file = attachedFile
-      receiptImageRef.current = new File([file], file.name, { type: file.type })
+      receiptImagesRef.current = [...receiptImagesRef.current, new File([file], file.name, { type: file.type })]
       setPrompt("")
       clearAttachment()
       void startScanFlow(file)
@@ -542,8 +560,8 @@ export function ExpenseChatShell() {
       try {
         const formData = new FormData()
         formData.append("receipts", JSON.stringify(receipts))
-        if (receiptImageRef.current) {
-          formData.append("image", receiptImageRef.current)
+        for (const img of receiptImagesRef.current) {
+          formData.append("images", img)
         }
 
         const res = await fetch("/api/receipt/pdf", {
@@ -577,12 +595,13 @@ export function ExpenseChatShell() {
 
       collectedReceiptsRef.current = []
       setCollectedReceipts([])
-      receiptImageRef.current = null
+      receiptImagesRef.current = []
     }, totalDelay)
   }, [addMessage])
 
   const handleSubmit = useCallback(
     (summaryFields: { label: string; value: string }[]) => {
+      setIsProcessing(false)
       setMessages((prev) => prev.filter((m) => m.type !== "summary"))
 
       const newReceipt: CollectedReceipt = { id: uid(), fields: summaryFields }
@@ -884,6 +903,7 @@ export function ExpenseChatShell() {
                       size="icon-lg"
                       className="rounded-full"
                       aria-label="Ladda upp fil"
+                      disabled={isProcessing}
                       onClick={() => fileInputRef.current?.click()}
                     >
                       <Paperclip className="size-4" />
@@ -893,7 +913,7 @@ export function ExpenseChatShell() {
                       size="icon-lg"
                       className="rounded-full"
                       aria-label="Ta bild"
-                      disabled={!hasCamera}
+                      disabled={!hasCamera || isProcessing}
                       onClick={() => cameraInputRef.current?.click()}
                     >
                       <Camera className="size-4" />
