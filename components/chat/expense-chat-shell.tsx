@@ -85,7 +85,7 @@ function shouldRouteToIntent(
 }
 
 const INTRO_MESSAGE_BODY =
-  "Hej! Lägg till eller fotografera ditt kvitto här i chatten så hjälper jag dig bokföra det."
+  "Hej! Lägg till eller fotografera ditt kvitto här i chatten så hjälper jag dig att generera en korrekt pdf."
 
 function makeIntroMessages(): ExpenseMessage[] {
   return [
