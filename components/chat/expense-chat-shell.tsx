@@ -251,14 +251,56 @@ export function ExpenseChatShell() {
 
   // --- File input ---
 
+  const acceptFile = useCallback((file: File) => {
+    setAttachedFile(file)
+    setAttachedPreviewUrl(isImageFile(file) ? URL.createObjectURL(file) : null)
+  }, [])
+
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0]
       if (!file) return
-      setAttachedFile(file)
-      setAttachedPreviewUrl(isImageFile(file) ? URL.createObjectURL(file) : null)
+      acceptFile(file)
     },
-    []
+    [acceptFile]
+  )
+
+  // --- Drag and drop ---
+
+  const [isDragging, setIsDragging] = useState(false)
+  const dragDepthRef = useRef(0)
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer?.types?.includes("Files")) return
+    e.preventDefault()
+    dragDepthRef.current += 1
+    setIsDragging(true)
+  }, [])
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer?.types?.includes("Files")) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = "copy"
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer?.types?.includes("Files")) return
+    e.preventDefault()
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+    if (dragDepthRef.current === 0) setIsDragging(false)
+  }, [])
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      if (!e.dataTransfer?.types?.includes("Files")) return
+      e.preventDefault()
+      dragDepthRef.current = 0
+      setIsDragging(false)
+      const file = e.dataTransfer.files?.[0]
+      if (!file) return
+      acceptFile(file)
+    },
+    [acceptFile]
   )
 
   // --- Send ---
@@ -415,8 +457,23 @@ export function ExpenseChatShell() {
   const canSend = !!attachedFile || !!prompt.trim()
 
   return (
-    <main className="grain min-h-screen overflow-hidden bg-background">
+    <main
+      className="grain min-h-screen overflow-hidden bg-background"
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       <FloatingNav onNewChat={handleNewChat} receipts={collectedReceipts} onGeneratePdf={handleGeneratePdf} />
+      {isDragging && (
+        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm">
+          <div className="rounded-2xl border-2 border-dashed border-primary bg-card/90 px-8 py-6 text-center shadow-lg">
+            <Paperclip className="mx-auto mb-2 size-6 text-primary" />
+            <p className="text-base font-medium text-foreground">Släpp filen för att ladda upp</p>
+            <p className="mt-1 text-sm text-muted-foreground">Vi tar emot bilder och PDF-kvitton</p>
+          </div>
+        </div>
+      )}
       <div className="relative flex h-screen flex-col overflow-hidden">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-primary/12 to-transparent" />
 
