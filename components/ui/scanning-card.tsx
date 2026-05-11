@@ -20,7 +20,7 @@ export function ScanningCard({ fields, className }: Props) {
       <ChainOfThought>
         {fields.map((field) => (
           <ChainOfThoughtStep
-            key={field.label}
+            key={`${field.label}-${field.status}`}
             defaultOpen={field.status !== "pending"}
           >
             <ChainOfThoughtTrigger
