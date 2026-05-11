@@ -71,10 +71,11 @@ const GENERATION_STEPS: GeneratingStep[] = [
   { label: "Genererar PDF", status: "pending" },
 ]
 
+const REPR_CATEGORIES = ["Representation, intern", "Representation, extern"]
+
 export function ExpenseChatShell() {
   const [prompt, setPrompt] = useState("")
   const [messages, setMessages] = useState<ExpenseMessage[]>([])
-  const [scanFields, setScanFields] = useState<ScanField[]>([])
   const [participants, setParticipants] = useState("")
   const [participantMessageId, setParticipantMessageId] = useState<string | null>(null)
   const [attachedFile, setAttachedFile] = useState<File | null>(null)
@@ -121,7 +122,6 @@ export function ExpenseChatShell() {
 
   const handleNewChat = useCallback(() => {
     setMessages([])
-    setScanFields([])
     setParticipants("")
     setParticipantMessageId(null)
     clearAttachment()
@@ -150,36 +150,84 @@ export function ExpenseChatShell() {
 
   // --- Summary ---
 
-  const showSummary = useCallback(
-    (category: string, participantValue: string) => {
-      const e = extractedRef.current
-      const fields: { label: string; value: string }[] = []
-      if (e.leverantor) fields.push({ label: "Leverantör", value: e.leverantor })
-      if (e.datum) fields.push({ label: "Datum", value: e.datum })
-      if (e.belopp) fields.push({ label: "Belopp", value: e.belopp })
-      fields.push({ label: "Kategori", value: category })
-      if (e.syfte && !["Representation, intern", "Representation, extern"].includes(category)) {
-        fields.push({ label: "Syfte", value: e.syfte })
-      }
-      if (participantValue !== "–") {
-        fields.push({ label: "Deltagare", value: participantValue })
-      }
-      addMessage({ id: uid(), role: "assistant", type: "summary", fields })
-    },
-    [addMessage]
-  )
+  const buildScanSnapshot = useCallback((): ScanField[] => {
+    return SCAN_FIELD_KEYS.map((entry) => {
+      const value = extractedRef.current[entry.key]
+      return value
+        ? { label: entry.label, status: "found", value }
+        : { label: entry.label, status: "missing" }
+    })
+  }, [])
 
-  const handleParticipantInput = useCallback(
-    (participantValue: string, category: string) => {
-      addMessage({ id: uid(), role: "user", type: "text", body: participantValue })
+  const pushProgressCard = useCallback(() => {
+    addMessage({
+      id: uid(),
+      role: "assistant",
+      type: "scanning",
+      fields: buildScanSnapshot(),
+    })
+  }, [addMessage, buildScanSnapshot])
+
+  const showSummary = useCallback(() => {
+    const e = extractedRef.current
+    const category = e.kategori ?? "Övrigt"
+    const isRepr = REPR_CATEGORIES.includes(category)
+
+    const fields: { label: string; value: string }[] = []
+    if (e.leverantor) fields.push({ label: "Leverantör", value: e.leverantor })
+    if (e.datum) fields.push({ label: "Datum", value: e.datum })
+    if (e.belopp) fields.push({ label: "Belopp", value: e.belopp })
+    fields.push({ label: "Kategori", value: category })
+    if (e.syfte && !isRepr) fields.push({ label: "Syfte", value: e.syfte })
+    if (e.deltagare) fields.push({ label: "Deltagare", value: e.deltagare })
+
+    addMessage({ id: uid(), role: "assistant", type: "summary", fields })
+  }, [addMessage])
+
+  // --- Step engine: walk through missing fields one at a time ---
+
+  const runStepEngine = useCallback(() => {
+    const acceptAnswer = (
+      key: keyof ExtractedReceipt,
+      displayValue: string,
+      storedValue: string,
+      extraUpdates?: Partial<ExtractedReceipt>
+    ) => {
+      addMessage({ id: uid(), role: "user", type: "text", body: displayValue })
       clearSuggestions()
-      setTimeout(() => showSummary(category, participantValue), 400)
-    },
-    [addMessage, clearSuggestions, showSummary]
-  )
+      extractedRef.current = {
+        ...extractedRef.current,
+        [key]: storedValue,
+        ...extraUpdates,
+      }
+      pushProgressCard()
+      setTimeout(next, 400)
+    }
 
-  const askForParticipants = useCallback(
-    (category: string) => {
+    const promptText = (key: keyof ExtractedReceipt, body: string) => {
+      addMessage({ id: uid(), role: "assistant", type: "text", body })
+      showSuggestions([], (value) => acceptAnswer(key, value, value))
+    }
+
+    const promptKategori = () => {
+      addMessage({
+        id: uid(),
+        role: "assistant",
+        type: "text",
+        body: "Vilken kategori passar utlägget? Välj från listan eller skriv eget.",
+      })
+      showSuggestions(CATEGORIES, (raw) => {
+        if (CATEGORIES.includes(raw)) {
+          acceptAnswer("kategori", raw, raw)
+        } else {
+          // Free-text → Övrigt with raw as syfte (so we don't re-ask syfte)
+          acceptAnswer("kategori", `Övrigt – ${raw}`, "Övrigt", { syfte: raw })
+        }
+      })
+    }
+
+    const promptDeltagare = () => {
+      const category = extractedRef.current.kategori
       if (category === "Representation, extern") {
         addMessage({
           id: uid(),
@@ -187,106 +235,74 @@ export function ExpenseChatShell() {
           type: "text",
           body: "Ange externa deltagare (namn och företag):",
         })
-        showSuggestions([], (value) => handleParticipantInput(value, category))
+        showSuggestions([], (value) => acceptAnswer("deltagare", value, value))
         return
       }
-
       const body =
         category === "Representation, intern"
           ? "Vilka interna deltagare var med? Välj ur listan."
           : "Vilka var med på utlägget? Välj ur listan eller skriv egna namn."
-
       addMessage({ id: uid(), role: "assistant", type: "text", body })
       setChipMode(true)
       setSelectedChips([])
       showSuggestions(EMPLOYEES, () => {})
-      setPendingAction(() => (value: string) => handleParticipantInput(value, category))
-    },
-    [addMessage, showSuggestions, handleParticipantInput]
-  )
+      setPendingAction(() => (value: string) => acceptAnswer("deltagare", value, value))
+    }
 
-  const handleCategoryInput = useCallback(
-    (rawInput: string) => {
-      const isKnown = CATEGORIES.includes(rawInput)
-      const category = isKnown ? rawInput : "Övrigt"
-      const label = isKnown ? rawInput : `Övrigt – ${rawInput}`
+    function next() {
+      const e = extractedRef.current
+      for (const entry of SCAN_FIELD_KEYS) {
+        if (e[entry.key]) continue
+        // Syfte isn't shown in the summary for Representation, so don't prompt.
+        if (entry.key === "syfte" && REPR_CATEGORIES.includes(e.kategori ?? "")) continue
 
-      addMessage({ id: uid(), role: "user", type: "text", body: label })
-      clearSuggestions()
-
-      const isIntern = category === "Representation, intern"
-      const isExtern = category === "Representation, extern"
-
-      setTimeout(() => {
-        if (isIntern || isExtern) {
-          askForParticipants(label)
-        } else if (category === "Övrigt") {
-          addMessage({
-            id: uid(),
-            role: "assistant",
-            type: "text",
-            body: "Beskriv kort vad utlägget avser:",
-          })
-          showSuggestions([], (value) => {
-            addMessage({ id: uid(), role: "user", type: "text", body: value })
-            clearSuggestions()
-            setTimeout(() => showSummary(`Övrigt – ${value}`, "–"), 400)
-          })
-        } else {
-          showSummary(label, "–")
+        switch (entry.key) {
+          case "leverantor":
+            promptText("leverantor", "Vad är leverantörens namn?")
+            return
+          case "datum":
+            promptText("datum", "Vilket datum gjordes inköpet? (YYYY-MM-DD)")
+            return
+          case "belopp":
+            promptText("belopp", "Vad är totalbeloppet (inkl. valuta)?")
+            return
+          case "kategori":
+            promptKategori()
+            return
+          case "syfte":
+            promptText("syfte", "Beskriv kort syftet med utlägget:")
+            return
+          case "deltagare":
+            promptDeltagare()
+            return
         }
-      }, 400)
-    },
-    [addMessage, clearSuggestions, showSummary, showSuggestions, askForParticipants]
-  )
-
-  const continueAfterScan = useCallback(
-    (extracted: ExtractedReceipt) => {
-      const category = extracted.kategori
-      const deltagare = extracted.deltagare
-
-      if (!category) {
-        addMessage({
-          id: uid(),
-          role: "assistant",
-          type: "text",
-          body: "Jag kunde inte identifiera kategori. Välj den som stämmer bäst:",
-        })
-        showSuggestions(CATEGORIES, handleCategoryInput)
-        return
       }
 
-      const isRepr =
-        category === "Representation, intern" ||
-        category === "Representation, extern"
+      showSummary()
+    }
 
-      // Always ask for representation receipts (extracted deltagare on receipts
-      // is unreliable). For other categories, only ask when deltagare is missing.
-      if (isRepr || !deltagare) {
-        askForParticipants(category)
-        return
-      }
-
-      showSummary(category, deltagare)
-    },
-    [addMessage, showSuggestions, handleCategoryInput, askForParticipants, showSummary]
-  )
+    next()
+  }, [addMessage, clearSuggestions, showSuggestions, pushProgressCard, showSummary])
 
   // --- Scan flow ---
 
   const animateScanFields = useCallback(
-    (extracted: ExtractedReceipt, onDone: () => void) => {
+    (scanMessageId: string, extracted: ExtractedReceipt, onDone: () => void) => {
       SCAN_FIELD_KEYS.forEach((entry, i) => {
         setTimeout(() => {
           const value = extracted[entry.key]
-          setScanFields((prev) =>
-            prev.map((f) =>
-              f.label === entry.label
-                ? value
-                  ? { label: entry.label, status: "found", value }
-                  : { label: entry.label, status: "missing" }
-                : f
-            )
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.id !== scanMessageId || m.type !== "scanning") return m
+              const updated = m.fields.map((f) =>
+                f.label === entry.label
+                  ? value
+                    ? { label: entry.label, status: "found" as const, value }
+                    : { label: entry.label, status: "missing" as const }
+                  : f
+              )
+              return { ...m, fields: updated }
+            })
           )
         }, 300 + i * 250)
       })
@@ -299,7 +315,6 @@ export function ExpenseChatShell() {
     async (file: File) => {
       const scanId = uid()
       const initialFields = INITIAL_SCAN_FIELDS.map((f) => ({ ...f }))
-      setScanFields(initialFields)
 
       addMessage({ id: uid(), role: "user", type: "text", body: `Laddar upp: ${file.name}` })
       addMessage({ id: scanId, role: "assistant", type: "scanning", fields: initialFields })
@@ -314,7 +329,13 @@ export function ExpenseChatShell() {
         extracted = json.fields ?? {}
       } catch (err) {
         console.error("extract-receipt error", err)
-        setScanFields((prev) => prev.map((f) => ({ ...f, status: "missing" })))
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === scanId && m.type === "scanning"
+              ? { ...m, fields: m.fields.map((f) => ({ ...f, status: "missing" as const })) }
+              : m
+          )
+        )
         addMessage({
           id: uid(),
           role: "assistant",
@@ -326,9 +347,9 @@ export function ExpenseChatShell() {
 
       extractedRef.current = extracted
 
-      animateScanFields(extracted, () => continueAfterScan(extracted))
+      animateScanFields(scanId, extracted, runStepEngine)
     },
-    [addMessage, animateScanFields, continueAfterScan]
+    [addMessage, animateScanFields, runStepEngine]
   )
 
   // --- File input ---
@@ -496,22 +517,13 @@ export function ExpenseChatShell() {
   const handleEditField = useCallback(
     (label: string) => {
       setMessages((prev) => prev.filter((m) => m.type !== "summary"))
-      if (label === "Kategori") {
-        setTimeout(() => {
-          addMessage({ id: uid(), role: "assistant", type: "text", body: "Vilken kategori ska utlägget ha?" })
-          showSuggestions(CATEGORIES, handleCategoryInput)
-        }, 100)
-      } else if (label === "Deltagare") {
-        setTimeout(() => {
-          addMessage({ id: uid(), role: "assistant", type: "text", body: "Vilka interna deltagare var med? Välj ur listan." })
-          setChipMode(true)
-          setSelectedChips([])
-          showSuggestions(EMPLOYEES, () => {})
-          setPendingAction(() => (value: string) => handleParticipantInput(value, "Representation, intern"))
-        }, 100)
+      const keyByLabel = SCAN_FIELD_KEYS.find((e) => e.label === label)?.key
+      if (keyByLabel) {
+        extractedRef.current = { ...extractedRef.current, [keyByLabel]: undefined }
       }
+      setTimeout(runStepEngine, 100)
     },
-    [addMessage, showSuggestions, handleCategoryInput, handleParticipantInput]
+    [runStepEngine]
   )
 
   const handleGeneratePdf = useCallback(() => {
@@ -661,7 +673,7 @@ export function ExpenseChatShell() {
                             className="mt-1 h-8 w-8 border border-border/70 bg-secondary text-secondary-foreground"
                           />
                           <div className="flex-1 py-1">
-                            <ScanningCard fields={scanFields} />
+                            <ScanningCard fields={message.fields} />
                           </div>
                         </Message>
                       )
