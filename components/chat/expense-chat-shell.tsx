@@ -49,6 +49,7 @@ type ExtractedReceipt = {
   belopp_sek?: string
   kategori?: string
   deltagare?: string
+  fritext?: string
   rader?: LineItem[]
 }
 
@@ -257,6 +258,9 @@ export function ExpenseChatShell() {
     }
 
     fields.push({ label: "Kategori", value: category })
+    if (category === "Övrigt" && e.fritext) {
+      fields.push({ label: "Fritext", value: e.fritext })
+    }
     if (e.deltagare) fields.push({ label: "Deltagare", value: e.deltagare })
 
     let exchangeRate: number | undefined
@@ -291,6 +295,11 @@ export function ExpenseChatShell() {
       addMessage({ id: uid(), role: "user", type: "text", body: displayValue })
       clearSuggestions()
       extractedRef.current = { ...extractedRef.current, [key]: storedValue }
+      // Fritext is only meaningful when kategori is "Övrigt". Drop any
+      // lingering value if the category just changed to something else.
+      if (key === "kategori" && storedValue !== "Övrigt") {
+        extractedRef.current = { ...extractedRef.current, fritext: undefined }
+      }
       pushProgressCard()
       setTimeout(next, 400)
     }
@@ -313,16 +322,46 @@ export function ExpenseChatShell() {
           ? [suggested, ...CATEGORIES.filter((c) => c !== suggested)]
           : CATEGORIES
       showSuggestions(options, (raw) => {
-        const chosen = CATEGORIES.includes(raw) ? raw : `Övrigt – ${raw}`
         kategoriConfirmedRef.current = true
-        // Representation kräver alltid att deltagare anges — rensa eventuellt
-        // AI-extraherat värde så deltagare-prompten alltid kör.
-        if (chosen.startsWith("Representation")) {
-          extractedRef.current = { ...extractedRef.current, deltagare: undefined }
-          deltagareSkippedRef.current = false
+        if (CATEGORIES.includes(raw)) {
+          // Representation kräver alltid att deltagare anges — rensa eventuellt
+          // AI-extraherat värde så deltagare-prompten alltid kör.
+          if (raw.startsWith("Representation")) {
+            extractedRef.current = { ...extractedRef.current, deltagare: undefined }
+            deltagareSkippedRef.current = false
+          }
+          acceptAnswer("kategori", raw, raw)
+        } else {
+          // Free-text → Övrigt with the typed description as fritext (so we
+          // don't re-prompt for fritext on the next step).
+          expectedFieldRef.current = null
+          addMessage({
+            id: uid(),
+            role: "user",
+            type: "text",
+            body: `Övrigt – ${raw}`,
+          })
+          clearSuggestions()
+          extractedRef.current = {
+            ...extractedRef.current,
+            kategori: "Övrigt",
+            fritext: raw,
+          }
+          pushProgressCard()
+          setTimeout(next, 400)
         }
-        acceptAnswer("kategori", chosen, chosen)
       })
+    }
+
+    const promptFritext = () => {
+      expectedFieldRef.current = "fritext"
+      addMessage({
+        id: uid(),
+        role: "assistant",
+        type: "text",
+        body: "Skriv en kort fritext som beskriver vad utlägget avser:",
+      })
+      showSuggestions([], (value) => acceptAnswer("fritext", value, value))
     }
 
     const promptDeltagare = () => {
@@ -358,6 +397,17 @@ export function ExpenseChatShell() {
         if (entry.key === "kategori") {
           if (e.kategori && kategoriConfirmedRef.current) continue
           promptKategori()
+          return
+        }
+        // Once kategori is confirmed as Övrigt, ask for the free-text
+        // description immediately — before deltagare or anything else.
+        if (
+          entry.key === "deltagare" &&
+          kategoriConfirmedRef.current &&
+          e.kategori === "Övrigt" &&
+          !e.fritext
+        ) {
+          promptFritext()
           return
         }
         if (entry.key === "deltagare" && deltagareSkippedRef.current) continue
@@ -597,7 +647,13 @@ export function ExpenseChatShell() {
 
   // --- Free-text intent (Gemini parses what the user wants) ---
 
-  type EditableField = "leverantor" | "datum" | "belopp" | "kategori" | "deltagare"
+  type EditableField =
+    | "leverantor"
+    | "datum"
+    | "belopp"
+    | "kategori"
+    | "deltagare"
+    | "fritext"
 
   type IntentAction =
     | { action: "set_field"; field: EditableField; value: string }
@@ -732,7 +788,23 @@ export function ExpenseChatShell() {
           updates[a.field] = a.value
           if (a.field === "kategori") kategoriConfirmedRef.current = true
         }
-        extractedRef.current = { ...extractedRef.current, ...updates }
+        // Fritext only applies to "Övrigt" — clear it if the category is
+        // being changed to anything else (unless the update itself sets a
+        // new fritext value too).
+        if (
+          updates.kategori &&
+          updates.kategori !== "Övrigt" &&
+          updates.fritext === undefined
+        ) {
+          updates.fritext = undefined
+          extractedRef.current = {
+            ...extractedRef.current,
+            ...updates,
+            fritext: undefined,
+          }
+        } else {
+          extractedRef.current = { ...extractedRef.current, ...updates }
+        }
         setMessages((prev) => prev.filter((m) => m.type !== "summary"))
         pushProgressCard()
         setTimeout(runStepEngine, 300)
@@ -937,7 +1009,9 @@ export function ExpenseChatShell() {
   const handleEditField = useCallback(
     (label: string) => {
       setMessages((prev) => prev.filter((m) => m.type !== "summary"))
-      const keyByLabel = SCAN_FIELD_KEYS.find((e) => e.label === label)?.key
+      const keyByLabel: keyof ExtractedReceipt | undefined =
+        SCAN_FIELD_KEYS.find((e) => e.label === label)?.key ??
+        (label === "Fritext" ? "fritext" : undefined)
       if (keyByLabel) {
         extractedRef.current = { ...extractedRef.current, [keyByLabel]: undefined }
         if (keyByLabel === "kategori") {
@@ -1131,7 +1205,7 @@ export function ExpenseChatShell() {
                             </p>
                             <SummaryCard
                               fields={message.fields}
-                              flowFields={["Kategori", "Deltagare"]}
+                              flowFields={["Kategori", "Deltagare", "Fritext"]}
                               lineItems={message.lineItems}
                               currency={message.currency ?? "SEK"}
                               exchangeRate={message.exchangeRate}

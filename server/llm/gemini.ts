@@ -25,6 +25,7 @@ export type ExtractedReceipt = {
   belopp_sek?: string
   kategori?: string
   deltagare?: string
+  fritext?: string
   rader?: LineItem[]
 }
 
@@ -129,7 +130,8 @@ Regler:
 - Identifiera valutan från symboler (kr/SEK, €/EUR, $/USD, £/GBP, Fr./CHF, NOK, DKK), landskontext eller språk på kvittot.
 - Om valutan inte är SEK, använd Google Search för att slå upp aktuell växelkurs och konvertera beloppet till SEK. Ange det konverterade beloppet i belopp_sek.
 - Om valutan redan är SEK, sätt belopp_sek till samma värde som belopp.
-- Extrahera alla synliga artikelrader med beskrivning och belopp. Varje post/vara på kvittot ska bli en rad. Om inga enskilda rader syns, returnera en tom array.`
+- Extrahera alla synliga artikelrader med beskrivning och belopp. Varje post/vara på kvittot ska bli en rad. Om inga enskilda rader syns, returnera en tom array.
+- Om du behöver mer kontext för att avgöra kategori (t.ex. okänd leverantör eller otydlig bransch) får du använda Google Search för att slå upp vad företaget gör — sök på leverantörens namn, organisationsnummer, eller adress för att avgöra vilken typ av verksamhet det är (t.ex. restaurang, parkering, hotell, datalicens). Använd informationen bara för att välja rätt kategori — hitta inga andra fält.`
 
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === "string" && v.trim().length > 0
@@ -232,6 +234,7 @@ const EDIT_FIELDS = [
   "belopp",
   "kategori",
   "deltagare",
+  "fritext",
 ] as const
 type EditField = (typeof EDIT_FIELDS)[number]
 
@@ -261,7 +264,7 @@ const INTENT_SCHEMA: Schema = {
           field: {
             type: Type.STRING,
             description:
-              "leverantor, datum, belopp, kategori eller deltagare. Tom sträng om irrelevant.",
+              "leverantor, datum, belopp, kategori, deltagare eller fritext. Tom sträng om irrelevant.",
           },
           value: {
             type: Type.STRING,
@@ -279,7 +282,7 @@ const INTENT_SCHEMA: Schema = {
 
 const INTENT_SYSTEM_INSTRUCTION = `Du tolkar användarens fritext i en kvittohanterings-app. Du får nuvarande tillstånd och meddelande. Returnera en lista med åtgärder ("actions"). Varje åtgärd är en av:
 
-- "set_field": användaren anger nytt värde för ett fält i kvittot som redigeras (t.ex. "ändra deltagare till Anna", "1080 SEK", "2026-03-24").
+- "set_field": användaren anger nytt värde för ett fält i kvittot som redigeras (t.ex. "ändra deltagare till Anna", "1080 SEK", "2026-03-24", "fritexten är Lunch med säljteamet").
 - "ask_field": användaren säger att ett fält är fel men ger inget nytt värde (t.ex. "deltagaren är fel").
 - "generate_pdf": användaren vill skapa/exportera/skicka PDF-sammanställning av redan sparade kvitton (t.ex. "generera pdf", "skicka filerna").
 - "add_receipt": användaren vill lägga till/registrera ett nytt kvitto (t.ex. "lägg till kvitto", "ladda upp ett till").
@@ -294,6 +297,7 @@ Tolkningsregler:
 - generate_pdf är bara giltigt om savedCount > 0.
 - set_field och ask_field är bara giltigt om ett kvitto är under redigering.
 - Vid set_field måste kategori vara EXAKT en av: ${RECEIPT_CATEGORIES.join(", ")}. Datum måste vara YYYY-MM-DD och rimligt giltigt. Belopp måste innehålla en siffra.
+- Fältet "fritext" är en kompletterande beskrivning (motsvarande syfte) som bara används när kategori är "Övrigt".
 
 För set_field returnera fält + normaliserat värde. För ask_field returnera fält. Annars lämna field/value tomma. Hitta inte på värden. Om inget passar, returnera en off_topic.`
 
