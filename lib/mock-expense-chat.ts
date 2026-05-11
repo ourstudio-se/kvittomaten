@@ -20,6 +20,7 @@ export type ExpenseMessage =
   | { id: string; role: "assistant"; type: "quick-reply"; body: string; options: string[] }
   | { id: string; role: "assistant"; type: "category-picker"; body: string; suggested: string; categories: string[] }
   | { id: string; role: "assistant"; type: "participant-input"; body: string }
+  | { id: string; role: "assistant"; type: "line-items"; items: { beskrivning: string; belopp: string }[] }
   | { id: string; role: "assistant"; type: "summary"; fields: { label: string; value: string }[] }
   | { id: string; role: "assistant"; type: "generating"; steps: GeneratingStep[] }
   | { id: string; role: "assistant"; type: "download"; filename: string; blobUrl: string }
