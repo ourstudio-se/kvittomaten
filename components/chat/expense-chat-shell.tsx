@@ -303,6 +303,26 @@ export function ExpenseChatShell() {
     [acceptFile]
   )
 
+  // --- Paste ---
+
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items
+      if (!items) return
+      for (const item of items) {
+        if (item.kind !== "file") continue
+        const file = item.getAsFile()
+        if (!file) continue
+        if (!file.type.startsWith("image/") && file.type !== "application/pdf") continue
+        e.preventDefault()
+        acceptFile(file)
+        return
+      }
+    }
+    window.addEventListener("paste", onPaste)
+    return () => window.removeEventListener("paste", onPaste)
+  }, [acceptFile])
+
   // --- Send ---
 
   const addChip = useCallback((name: string) => {
