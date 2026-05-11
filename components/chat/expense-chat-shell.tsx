@@ -472,53 +472,71 @@ export function ExpenseChatShell() {
 
   const filteredSuggestions = useMemo(() => {
     const q = prompt.toLowerCase()
-    return suggestions.filter(
-      (s) => !selectedChips.includes(s) && s.toLowerCase().includes(q)
-    )
-  }, [suggestions, selectedChips, prompt])
+    return suggestions.filter((s) => s.toLowerCase().includes(q))
+  }, [suggestions, prompt])
 
-  const [activeChipIndex, setActiveChipIndex] = useState(0)
+  const selectableIndices = useMemo(
+    () =>
+      chipMode
+        ? filteredSuggestions
+            .map((s, i) => (selectedChips.includes(s) ? -1 : i))
+            .filter((i) => i !== -1)
+        : filteredSuggestions.map((_, i) => i),
+    [chipMode, filteredSuggestions, selectedChips]
+  )
+
+  const [activeChipIndex, setActiveChipIndex] = useState(-1)
 
   useEffect(() => {
-    setActiveChipIndex(0)
+    setActiveChipIndex(-1)
   }, [suggestions])
 
   const handlePromptChange = useCallback((value: string) => {
     setPrompt(value)
-    setActiveChipIndex(0)
+    setActiveChipIndex(value.trim().length > 0 ? 0 : -1)
   }, [])
 
   const safeActiveChipIndex =
-    filteredSuggestions.length === 0
-      ? 0
-      : Math.min(activeChipIndex, filteredSuggestions.length - 1)
+    activeChipIndex < 0 || selectableIndices.length === 0
+      ? -1
+      : selectableIndices.includes(activeChipIndex)
+        ? activeChipIndex
+        : selectableIndices[0]
 
   const activeChipSuggestion =
-    chipMode && filteredSuggestions.length > 0
+    chipMode && safeActiveChipIndex >= 0
       ? filteredSuggestions[safeActiveChipIndex]
       : null
 
   const handleChipKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (!chipMode || filteredSuggestions.length === 0) return
+      if (!chipMode || selectableIndices.length === 0) return
       if (e.key === "ArrowDown" || (e.key === "Tab" && !e.shiftKey)) {
         e.preventDefault()
-        setActiveChipIndex((i) => (i + 1) % filteredSuggestions.length)
+        setActiveChipIndex((curr) => {
+          const pos = selectableIndices.indexOf(curr)
+          if (pos === -1) return selectableIndices[0]
+          return selectableIndices[(pos + 1) % selectableIndices.length]
+        })
       } else if (e.key === "ArrowUp" || (e.key === "Tab" && e.shiftKey)) {
         e.preventDefault()
-        setActiveChipIndex(
-          (i) => (i - 1 + filteredSuggestions.length) % filteredSuggestions.length
-        )
+        setActiveChipIndex((curr) => {
+          const pos = selectableIndices.indexOf(curr)
+          if (pos === -1) return selectableIndices[selectableIndices.length - 1]
+          return selectableIndices[
+            (pos - 1 + selectableIndices.length) % selectableIndices.length
+          ]
+        })
       }
     },
-    [chipMode, filteredSuggestions.length]
+    [chipMode, selectableIndices]
   )
 
   const handlePromptSubmit = useCallback(() => {
     const value = prompt.trim()
 
     if (chipMode) {
-      const userIntent = value.length > 0 || safeActiveChipIndex > 0
+      const userIntent = value.length > 0 || safeActiveChipIndex >= 0
       if (userIntent && activeChipSuggestion) {
         addChip(activeChipSuggestion)
         return
@@ -858,16 +876,21 @@ export function ExpenseChatShell() {
                   />
                   <div className="relative flex flex-wrap gap-2 px-1 py-1">
                     {filteredSuggestions.map((s, idx) => {
-                      const isActive = chipMode && idx === safeActiveChipIndex
+                      const isSelected = chipMode && selectedChips.includes(s)
+                      const isActive =
+                        chipMode && !isSelected && idx === safeActiveChipIndex
                       return (
                         <PromptSuggestion
                           key={s}
                           size="sm"
                           highlight={chipMode ? undefined : prompt}
+                          disabled={isSelected}
                           className={
-                            isActive
-                              ? "border-primary bg-primary/10 text-foreground ring-2 ring-primary/40"
-                              : undefined
+                            isSelected
+                              ? "border-dashed text-muted-foreground opacity-50"
+                              : isActive
+                                ? "border-primary bg-primary/10 text-foreground ring-2 ring-primary/40"
+                                : undefined
                           }
                           onClick={() => {
                             if (chipMode) {
