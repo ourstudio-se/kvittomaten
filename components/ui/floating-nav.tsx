@@ -1,6 +1,6 @@
 "use client"
 
-import { FileText, SquarePen } from "lucide-react"
+import { FileText, SquarePen, Trash2 } from "lucide-react"
 import { DropdownMenu } from "radix-ui"
 import { Button } from "@/components/ui/button"
 import type { CollectedReceipt } from "@/lib/mock-expense-chat"
@@ -9,9 +9,15 @@ interface FloatingNavProps {
   onNewChat: () => void
   receipts?: CollectedReceipt[]
   onGeneratePdf?: () => void
+  onDeleteReceipt?: (id: string) => void
 }
 
-export function FloatingNav({ onNewChat, receipts = [], onGeneratePdf }: FloatingNavProps) {
+export function FloatingNav({
+  onNewChat,
+  receipts = [],
+  onGeneratePdf,
+  onDeleteReceipt,
+}: FloatingNavProps) {
   const count = receipts.length
 
   return (
@@ -52,13 +58,27 @@ export function FloatingNav({ onNewChat, receipts = [], onGeneratePdf }: Floatin
                 return (
                   <div
                     key={receipt.id}
-                    className="flex items-center justify-between rounded-sm px-2 py-2 text-sm"
+                    className="flex items-center gap-2 rounded-sm px-2 py-2 text-sm"
                   >
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <span className="font-medium">{supplier}</span>
                       {category && <span className="ml-2 text-xs text-muted-foreground">{category}</span>}
                     </div>
                     {amount && <span className="text-muted-foreground">{amount}</span>}
+                    {onDeleteReceipt && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          onDeleteReceipt(receipt.id)
+                        }}
+                        aria-label={`Ta bort kvitto från ${supplier}`}
+                        className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-destructive focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      >
+                        <Trash2 className="size-4" />
+                      </button>
+                    )}
                   </div>
                 )
               })}

@@ -597,9 +597,11 @@ export function ExpenseChatShell() {
 
   // --- Free-text intent (Gemini parses what the user wants) ---
 
+  type EditableField = "leverantor" | "datum" | "belopp" | "kategori" | "deltagare"
+
   type IntentAction =
-    | { action: "set_field"; field: keyof ExtractedReceipt; value: string }
-    | { action: "ask_field"; field: keyof ExtractedReceipt }
+    | { action: "set_field"; field: EditableField; value: string }
+    | { action: "ask_field"; field: EditableField }
     | { action: "generate_pdf" }
     | { action: "add_receipt" }
     | { action: "cancel" }
@@ -691,7 +693,7 @@ export function ExpenseChatShell() {
     async (message: string, opts?: { expectingField?: keyof ExtractedReceipt }) => {
       addMessage({ id: uid(), role: "user", type: "text", body: message })
 
-      let result: IntentAction = { action: "off_topic" }
+      let actions: IntentAction[] = [{ action: "off_topic" }]
       try {
         const res = await fetch("/api/edit-receipt", {
           method: "POST",
@@ -703,49 +705,62 @@ export function ExpenseChatShell() {
             message,
           }),
         })
-        if (res.ok) result = (await res.json()) as IntentAction
+        if (res.ok) {
+          const json = (await res.json()) as { actions?: IntentAction[] }
+          if (Array.isArray(json.actions) && json.actions.length > 0) {
+            actions = json.actions
+          }
+        }
       } catch (err) {
         console.error("intent error", err)
       }
 
-      if (result.action === "set_field") {
-        extractedRef.current = {
-          ...extractedRef.current,
-          [result.field]: result.value,
+      // Cancel always wins.
+      if (actions.some((a) => a.action === "cancel")) {
+        cancelCurrentFlow()
+        return
+      }
+
+      // Apply every set_field (multi-field edits in one message).
+      const setFields = actions.filter(
+        (a): a is Extract<IntentAction, { action: "set_field" }> =>
+          a.action === "set_field"
+      )
+      if (setFields.length > 0) {
+        const updates: Partial<ExtractedReceipt> = {}
+        for (const a of setFields) {
+          updates[a.field] = a.value
+          if (a.field === "kategori") kategoriConfirmedRef.current = true
         }
-        if (result.field === "kategori") {
-          kategoriConfirmedRef.current = true
-        }
+        extractedRef.current = { ...extractedRef.current, ...updates }
         setMessages((prev) => prev.filter((m) => m.type !== "summary"))
         pushProgressCard()
-        // Continue the step engine — it'll prompt for whatever's still
-        // missing, or render the summary if everything is filled.
         setTimeout(runStepEngine, 300)
         return
       }
 
-      if (result.action === "ask_field") {
+      // Single-action fallbacks below.
+      const askField = actions.find(
+        (a): a is Extract<IntentAction, { action: "ask_field" }> =>
+          a.action === "ask_field"
+      )
+      if (askField) {
         extractedRef.current = {
           ...extractedRef.current,
-          [result.field]: undefined,
+          [askField.field]: undefined,
         }
         setMessages((prev) => prev.filter((m) => m.type !== "summary"))
         setTimeout(runStepEngine, 100)
         return
       }
 
-      if (result.action === "generate_pdf") {
+      if (actions.some((a) => a.action === "generate_pdf")) {
         handleGeneratePdf()
         return
       }
 
-      if (result.action === "add_receipt") {
+      if (actions.some((a) => a.action === "add_receipt")) {
         fileInputRef.current?.click()
-        return
-      }
-
-      if (result.action === "cancel") {
-        cancelCurrentFlow()
         return
       }
 
@@ -943,6 +958,18 @@ export function ExpenseChatShell() {
     includedRaderRef.current = included
   }, [])
 
+  const handleDeleteReceipt = useCallback((id: string) => {
+    const idx = collectedReceiptsRef.current.findIndex((r) => r.id === id)
+    if (idx < 0) return
+    collectedReceiptsRef.current = collectedReceiptsRef.current.filter(
+      (_, i) => i !== idx
+    )
+    receiptImagesRef.current = receiptImagesRef.current.filter(
+      (_, i) => i !== idx
+    )
+    setCollectedReceipts(collectedReceiptsRef.current)
+  }, [])
+
   const handleSkipDeltagare = useCallback(() => {
     deltagareSkippedRef.current = true
     expectedFieldRef.current = null
@@ -1022,7 +1049,12 @@ export function ExpenseChatShell() {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <FloatingNav onNewChat={handleNewChat} receipts={collectedReceipts} onGeneratePdf={handleGeneratePdf} />
+      <FloatingNav
+        onNewChat={handleNewChat}
+        receipts={collectedReceipts}
+        onGeneratePdf={handleGeneratePdf}
+        onDeleteReceipt={handleDeleteReceipt}
+      />
       {isDragging && (
         <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm">
           <div className="rounded-2xl border-2 border-dashed border-primary bg-card/90 px-8 py-6 text-center shadow-lg">

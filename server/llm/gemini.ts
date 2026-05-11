@@ -246,27 +246,38 @@ export type IntentAction =
 const INTENT_SCHEMA: Schema = {
   type: Type.OBJECT,
   properties: {
-    action: {
-      type: Type.STRING,
+    actions: {
+      type: Type.ARRAY,
       description:
-        "set_field, ask_field, generate_pdf, add_receipt, cancel eller off_topic",
-    },
-    field: {
-      type: Type.STRING,
-      description:
-        "leverantor, datum, belopp, kategori eller deltagare. Tom sträng om irrelevant.",
-    },
-    value: {
-      type: Type.STRING,
-      description:
-        "Nytt värde för fältet (bara för set_field). Tom sträng annars.",
+        "En eller flera åtgärder. Om användaren ber om flera ändringar i ett och samma meddelande, returnera en set_field per fält.",
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          action: {
+            type: Type.STRING,
+            description:
+              "set_field, ask_field, generate_pdf, add_receipt, cancel eller off_topic",
+          },
+          field: {
+            type: Type.STRING,
+            description:
+              "leverantor, datum, belopp, kategori eller deltagare. Tom sträng om irrelevant.",
+          },
+          value: {
+            type: Type.STRING,
+            description:
+              "Nytt värde för fältet (bara för set_field). Tom sträng annars.",
+          },
+        },
+        required: ["action", "field", "value"],
+        propertyOrdering: ["action", "field", "value"],
+      },
     },
   },
-  required: ["action", "field", "value"],
-  propertyOrdering: ["action", "field", "value"],
+  required: ["actions"],
 }
 
-const INTENT_SYSTEM_INSTRUCTION = `Du tolkar användarens fritext i en kvittohanterings-app. Du får nuvarande tillstånd och meddelande. Välj EN action:
+const INTENT_SYSTEM_INSTRUCTION = `Du tolkar användarens fritext i en kvittohanterings-app. Du får nuvarande tillstånd och meddelande. Returnera en lista med åtgärder ("actions"). Varje åtgärd är en av:
 
 - "set_field": användaren anger nytt värde för ett fält i kvittot som redigeras (t.ex. "ändra deltagare till Anna", "1080 SEK", "2026-03-24").
 - "ask_field": användaren säger att ett fält är fel men ger inget nytt värde (t.ex. "deltagaren är fel").
@@ -276,62 +287,24 @@ const INTENT_SYSTEM_INSTRUCTION = `Du tolkar användarens fritext i en kvittohan
 - "off_topic": meddelandet handlar inte om något av ovanstående.
 
 Tolkningsregler:
-- "cancel"-nyckelord (göra om, börja om, starta om, avbryt) tar ALLTID företräde, även om de står tillsammans med annan text.
+- Om användaren ber om FLERA ändringar i ett och samma meddelande ("ändra datum till … och deltagaren till …") → returnera EN set_field per fält i actions-listan.
+- "cancel"-nyckelord (göra om, börja om, starta om, avbryt) tar ALLTID företräde, även om de står tillsammans med annan text — returnera då bara en cancel.
 - Om expectingField är angivet och meddelandet är ett rimligt värde för det fältet → set_field(expectingField, värdet). Normalisera (datum → YYYY-MM-DD, kategori → exakt matchning, belopp → t.ex. "1 080 SEK").
 - Om expectingField är angivet MEN meddelandet tydligt rör ett annat fält ("ändra datumet till …") → set_field för det andra fältet istället.
 - generate_pdf är bara giltigt om savedCount > 0.
 - set_field och ask_field är bara giltigt om ett kvitto är under redigering.
 - Vid set_field måste kategori vara EXAKT en av: ${RECEIPT_CATEGORIES.join(", ")}. Datum måste vara YYYY-MM-DD och rimligt giltigt. Belopp måste innehålla en siffra.
 
-För set_field returnera fält + normaliserat värde. För ask_field returnera fält. Annars lämna field/value tomma. Hitta inte på värden.`
+För set_field returnera fält + normaliserat värde. För ask_field returnera fält. Annars lämna field/value tomma. Hitta inte på värden. Om inget passar, returnera en off_topic.`
 
-export async function interpretIntent({
-  extracted,
-  savedCount,
-  expectingField,
-  message,
-}: {
-  extracted: ExtractedReceipt
+function classifySingle(
+  raw: { action?: string; field?: string; value?: string },
+  inFlight: boolean,
   savedCount: number
-  expectingField?: string
-  message: string
-}): Promise<IntentAction> {
-  const ai = getClient()
-
-  const inFlight = Object.values(extracted).some((v) => v != null)
-
-  const prompt = `Tillstånd:
-- Kvitto under redigering: ${inFlight ? "ja" : "nej"}
-- Nuvarande fält: ${JSON.stringify(extracted)}
-- Antal sparade kvitton (kan exporteras till PDF): ${savedCount}
-- expectingField (fält som just nu efterfrågas, om något): ${expectingField ?? "—"}
-
-Användarens meddelande: "${message}"`
-
-  const response = await ai.models.generateContent({
-    model: MODEL,
-    contents: prompt,
-    config: {
-      systemInstruction: INTENT_SYSTEM_INSTRUCTION,
-      thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
-      responseMimeType: "application/json",
-      responseSchema: INTENT_SCHEMA,
-    },
-  })
-
-  const text = response.text
-  if (!text) return { action: "off_topic" }
-
-  let parsed: { action?: string; field?: string; value?: string }
-  try {
-    parsed = JSON.parse(text)
-  } catch {
-    return { action: "off_topic" }
-  }
-
-  const action = parsed.action
-  const field = parsed.field?.trim() ?? ""
-  const value = parsed.value?.trim() ?? ""
+): IntentAction {
+  const action = raw.action
+  const field = raw.field?.trim() ?? ""
+  const value = raw.value?.trim() ?? ""
   const isKnownField = (EDIT_FIELDS as readonly string[]).includes(field)
 
   if (action === "set_field" && inFlight && isKnownField && value) {
@@ -359,6 +332,86 @@ Användarens meddelande: "${message}"`
     return { action: "cancel" }
   }
   return { action: "off_topic" }
+}
+
+export async function interpretIntent({
+  extracted,
+  savedCount,
+  expectingField,
+  message,
+}: {
+  extracted: ExtractedReceipt
+  savedCount: number
+  expectingField?: string
+  message: string
+}): Promise<IntentAction[]> {
+  const ai = getClient()
+
+  const inFlight = Object.values(extracted).some((v) => v != null)
+
+  const prompt = `Tillstånd:
+- Kvitto under redigering: ${inFlight ? "ja" : "nej"}
+- Nuvarande fält: ${JSON.stringify(extracted)}
+- Antal sparade kvitton (kan exporteras till PDF): ${savedCount}
+- expectingField (fält som just nu efterfrågas, om något): ${expectingField ?? "—"}
+
+Användarens meddelande: "${message}"`
+
+  const response = await ai.models.generateContent({
+    model: MODEL,
+    contents: prompt,
+    config: {
+      systemInstruction: INTENT_SYSTEM_INSTRUCTION,
+      thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+      responseMimeType: "application/json",
+      responseSchema: INTENT_SCHEMA,
+    },
+  })
+
+  const text = response.text
+  if (!text) return [{ action: "off_topic" }]
+
+  let parsed: { actions?: { action?: string; field?: string; value?: string }[] }
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return [{ action: "off_topic" }]
+  }
+
+  const raw = Array.isArray(parsed.actions) ? parsed.actions : []
+  if (raw.length === 0) return [{ action: "off_topic" }]
+
+  const classified = raw.map((r) => classifySingle(r, inFlight, savedCount))
+
+  // Cancel takes precedence over everything else.
+  if (classified.some((a) => a.action === "cancel")) {
+    return [{ action: "cancel" }]
+  }
+
+  // Dedupe: for set_field, last write wins per field. Keep ask_field for
+  // fields not already being set.
+  const setFieldByKey = new Map<EditField, IntentAction>()
+  const otherActions: IntentAction[] = []
+  for (const a of classified) {
+    if (a.action === "set_field") {
+      setFieldByKey.set(a.field, a)
+    } else if (a.action === "ask_field") {
+      // Only keep ask_field if there isn't a set_field for this field.
+      if (!setFieldByKey.has(a.field)) {
+        // Replace any previous ask_field for the same field.
+        const idx = otherActions.findIndex(
+          (o) => o.action === "ask_field" && o.field === a.field
+        )
+        if (idx >= 0) otherActions[idx] = a
+        else otherActions.push(a)
+      }
+    } else {
+      otherActions.push(a)
+    }
+  }
+
+  const result: IntentAction[] = [...setFieldByKey.values(), ...otherActions]
+  return result.length > 0 ? result : [{ action: "off_topic" }]
 }
 
 const CHAT_SYSTEM_INSTRUCTION = `Du är en assistent som hjälper anställda att registrera utlägg och kvitton på svenska. Du svarar kortfattat och vänligt.
