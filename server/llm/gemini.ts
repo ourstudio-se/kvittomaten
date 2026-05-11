@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai"
+import { GoogleGenAI, ThinkingLevel } from "@google/genai"
 
 function getApiKey() {
   const key = process.env.GEMINI_API_KEY
@@ -16,13 +16,21 @@ export async function* streamGeminiText({
   prompt: string
   model?: string
 }): AsyncGenerator<string> {
-  const genAI = new GoogleGenerativeAI(getApiKey())
-  const geminiModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" })
+  const ai = new GoogleGenAI({ apiKey: getApiKey() })
 
-  const result = await geminiModel.generateContentStream(prompt)
-  for await (const chunk of result.stream) {
-    const text = chunk.text()
+  const stream = await ai.models.generateContentStream({
+    model: "gemini-3-flash-preview",
+    contents: prompt,
+    config: {
+      thinkingConfig: {
+        thinkingLevel: ThinkingLevel.MEDIUM,
+      },
+      tools: [{ googleSearch: {} }, { googleMaps: {} }],
+    },
+  })
+
+  for await (const chunk of stream) {
+    const text = chunk.text
     if (text) yield text
   }
 }
-
