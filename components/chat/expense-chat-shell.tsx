@@ -63,6 +63,22 @@ function isImageFile(file: File) {
   return file.type.startsWith("image/")
 }
 
+const COMMAND_PREFIX = /^(kan vi|kan du|byt|ändra|ångra|avbryt|fel|glöm|nytt|starta|gör|ny|skapa|generera|exportera|skicka|nollställ|börja|stäng)\b/i
+
+function shouldRouteToIntent(
+  value: string,
+  field: keyof ExtractedReceipt
+): boolean {
+  const t = value.trim()
+  if (!t) return false
+  if (t.includes("?")) return true
+  if (t.length > 60) return true
+  if (COMMAND_PREFIX.test(t)) return true
+  if (field === "datum" && !/^\d{4}-\d{1,2}-\d{1,2}$/.test(t)) return true
+  if (field === "belopp" && !/\d/.test(t)) return true
+  return false
+}
+
 const GENERATION_STEPS: GeneratingStep[] = [
   { label: "Sammanställer uppgifter", status: "pending" },
   { label: "Formaterar kvittodokument", status: "pending" },
@@ -87,6 +103,7 @@ export function ExpenseChatShell() {
   const receiptImageRef = useRef<File | null>(null)
 
   const extractedRef = useRef<ExtractedReceipt>({})
+  const expectedFieldRef = useRef<keyof ExtractedReceipt | null>(null)
 
   const [hasCamera, setHasCamera] = useState(false)
   const cameraInputRef = useRef<HTMLInputElement>(null)
@@ -188,6 +205,7 @@ export function ExpenseChatShell() {
       displayValue: string,
       storedValue: string
     ) => {
+      expectedFieldRef.current = null
       addMessage({ id: uid(), role: "user", type: "text", body: displayValue })
       clearSuggestions()
       extractedRef.current = { ...extractedRef.current, [key]: storedValue }
@@ -196,11 +214,13 @@ export function ExpenseChatShell() {
     }
 
     const promptText = (key: keyof ExtractedReceipt, body: string) => {
+      expectedFieldRef.current = key
       addMessage({ id: uid(), role: "assistant", type: "text", body })
       showSuggestions([], (value) => acceptAnswer(key, value, value))
     }
 
     const promptKategori = () => {
+      expectedFieldRef.current = "kategori"
       addMessage({
         id: uid(),
         role: "assistant",
@@ -219,6 +239,7 @@ export function ExpenseChatShell() {
     }
 
     const promptDeltagare = () => {
+      expectedFieldRef.current = "deltagare"
       const category = extractedRef.current.kategori
       if (category === "Representation, extern") {
         addMessage({
@@ -447,6 +468,163 @@ export function ExpenseChatShell() {
     [addMessage, updateTextMessage]
   )
 
+  // --- Free-text intent (Gemini parses what the user wants) ---
+
+  type IntentAction =
+    | { action: "set_field"; field: keyof ExtractedReceipt; value: string }
+    | { action: "ask_field"; field: keyof ExtractedReceipt }
+    | { action: "generate_pdf" }
+    | { action: "add_receipt" }
+    | { action: "cancel" }
+    | { action: "off_topic" }
+
+  const cancelCurrentFlow = useCallback(
+    (note = "Avbrutet. Du kan ladda upp ett nytt kvitto.") => {
+      extractedRef.current = {}
+      expectedFieldRef.current = null
+      clearSuggestions()
+      clearAttachment()
+      addMessage({ id: uid(), role: "assistant", type: "text", body: note })
+    },
+    [addMessage, clearSuggestions, clearAttachment]
+  )
+
+  const handleGeneratePdf = useCallback(() => {
+    const receipts = collectedReceiptsRef.current
+    if (receipts.length === 0) return
+
+    const gid = uid()
+    const initialSteps = GENERATION_STEPS.map((s) => ({ ...s }))
+    setGeneratingSteps(initialSteps)
+
+    setTimeout(() => {
+      addMessage({ id: gid, role: "assistant", type: "generating", steps: initialSteps })
+    }, 100)
+
+    initialSteps.forEach((_, i) => {
+      setTimeout(() => {
+        setGeneratingSteps((prev) =>
+          prev.map((s, idx) => (idx === i ? { ...s, status: "done" } : s))
+        )
+      }, 800 + i * 900)
+    })
+
+    const totalDelay = 800 + initialSteps.length * 900 + 400
+    setTimeout(async () => {
+      try {
+        const formData = new FormData()
+        formData.append("receipts", JSON.stringify(receipts))
+        if (receiptImageRef.current) {
+          formData.append("image", receiptImageRef.current)
+        }
+
+        const res = await fetch("/api/receipt/pdf", {
+          method: "POST",
+          body: formData,
+        })
+
+        if (!res.ok) {
+          throw new Error(`PDF generation failed (${res.status})`)
+        }
+
+        const blob = await res.blob()
+        const count = receipts.length
+        const filename = count === 1 ? "verifikation.pdf" : `verifikation-${count}-kvitton.pdf`
+
+        addMessage({
+          id: uid(),
+          role: "assistant",
+          type: "download",
+          filename,
+          blobUrl: URL.createObjectURL(blob),
+        })
+      } catch (err) {
+        addMessage({
+          id: uid(),
+          role: "assistant",
+          type: "text",
+          body: `Kunde inte generera PDF: ${err instanceof Error ? err.message : "Okänt fel"}`,
+        })
+      }
+
+      collectedReceiptsRef.current = []
+      setCollectedReceipts([])
+      receiptImageRef.current = null
+    }, totalDelay)
+  }, [addMessage])
+
+  const handleIntent = useCallback(
+    async (message: string, opts?: { expectingField?: keyof ExtractedReceipt }) => {
+      addMessage({ id: uid(), role: "user", type: "text", body: message })
+
+      let result: IntentAction = { action: "off_topic" }
+      try {
+        const res = await fetch("/api/edit-receipt", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            extracted: extractedRef.current,
+            savedCount: collectedReceiptsRef.current.length,
+            expectingField: opts?.expectingField ?? null,
+            message,
+          }),
+        })
+        if (res.ok) result = (await res.json()) as IntentAction
+      } catch (err) {
+        console.error("intent error", err)
+      }
+
+      if (result.action === "set_field") {
+        extractedRef.current = {
+          ...extractedRef.current,
+          [result.field]: result.value,
+        }
+        setMessages((prev) => prev.filter((m) => m.type !== "summary"))
+        pushProgressCard()
+        // Continue the step engine — it'll prompt for whatever's still
+        // missing, or render the summary if everything is filled.
+        setTimeout(runStepEngine, 300)
+        return
+      }
+
+      if (result.action === "ask_field") {
+        extractedRef.current = {
+          ...extractedRef.current,
+          [result.field]: undefined,
+        }
+        setMessages((prev) => prev.filter((m) => m.type !== "summary"))
+        setTimeout(runStepEngine, 100)
+        return
+      }
+
+      if (result.action === "generate_pdf") {
+        handleGeneratePdf()
+        return
+      }
+
+      if (result.action === "add_receipt") {
+        fileInputRef.current?.click()
+        return
+      }
+
+      if (result.action === "cancel") {
+        cancelCurrentFlow()
+        return
+      }
+
+      // off_topic → fall back to the general chat assistant
+      await streamFreeTextReply(message)
+    },
+    [
+      addMessage,
+      pushProgressCard,
+      runStepEngine,
+      streamFreeTextReply,
+      cancelCurrentFlow,
+      handleGeneratePdf,
+    ]
+  )
+
   // --- Send ---
 
   const addChip = useCallback((name: string) => {
@@ -518,6 +696,23 @@ export function ExpenseChatShell() {
     }
 
     if (pendingAction && value) {
+      // Escape hatch: cancel the in-flight prompt even though pendingAction
+      // would otherwise swallow the input.
+      if (/^(avbryt|ångra|fel kvitto|glöm det|börja om)\.?$/i.test(value)) {
+        setPrompt("")
+        addMessage({ id: uid(), role: "user", type: "text", body: value })
+        cancelCurrentFlow()
+        return
+      }
+      // If the message looks like a command (or fails the field's format
+      // check), route it through the intent handler instead of letting
+      // pendingAction blindly accept it as the field value.
+      const expected = expectedFieldRef.current
+      if (expected && shouldRouteToIntent(value, expected)) {
+        setPrompt("")
+        void handleIntent(value, { expectingField: expected })
+        return
+      }
       pendingAction(value)
       setPrompt("")
       return
@@ -533,8 +728,15 @@ export function ExpenseChatShell() {
     }
 
     if (value) {
-      addMessage({ id: uid(), role: "user", type: "text", body: value })
       setPrompt("")
+      const hasReceiptInProgress =
+        Object.values(extractedRef.current).some((v) => v != null)
+      const hasSavedReceipts = collectedReceiptsRef.current.length > 0
+      if (hasReceiptInProgress || hasSavedReceipts) {
+        void handleIntent(value)
+        return
+      }
+      addMessage({ id: uid(), role: "user", type: "text", body: value })
       void streamFreeTextReply(value)
     }
   }, [
@@ -547,6 +749,8 @@ export function ExpenseChatShell() {
     clearAttachment,
     addMessage,
     streamFreeTextReply,
+    handleIntent,
+    cancelCurrentFlow,
     activeChipSuggestion,
     addChip,
     safeActiveChipIndex,
@@ -566,70 +770,6 @@ export function ExpenseChatShell() {
     [runStepEngine]
   )
 
-  const handleGeneratePdf = useCallback(() => {
-    const receipts = collectedReceiptsRef.current
-    if (receipts.length === 0) return
-
-    const gid = uid()
-    const initialSteps = GENERATION_STEPS.map((s) => ({ ...s }))
-    setGeneratingSteps(initialSteps)
-
-    setTimeout(() => {
-      addMessage({ id: gid, role: "assistant", type: "generating", steps: initialSteps })
-    }, 100)
-
-    initialSteps.forEach((_, i) => {
-      setTimeout(() => {
-        setGeneratingSteps((prev) =>
-          prev.map((s, idx) => (idx === i ? { ...s, status: "done" } : s))
-        )
-      }, 800 + i * 900)
-    })
-
-    const totalDelay = 800 + initialSteps.length * 900 + 400
-    setTimeout(async () => {
-      try {
-        const formData = new FormData()
-        formData.append("receipts", JSON.stringify(receipts))
-        if (receiptImageRef.current) {
-          formData.append("image", receiptImageRef.current)
-        }
-
-        const res = await fetch("/api/receipt/pdf", {
-          method: "POST",
-          body: formData,
-        })
-
-        if (!res.ok) {
-          throw new Error(`PDF generation failed (${res.status})`)
-        }
-
-        const blob = await res.blob()
-        const count = receipts.length
-        const filename = count === 1 ? "verifikation.pdf" : `verifikation-${count}-kvitton.pdf`
-
-        addMessage({
-          id: uid(),
-          role: "assistant",
-          type: "download",
-          filename,
-          blobUrl: URL.createObjectURL(blob),
-        })
-      } catch (err) {
-        addMessage({
-          id: uid(),
-          role: "assistant",
-          type: "text",
-          body: `Kunde inte generera PDF: ${err instanceof Error ? err.message : "Okänt fel"}`,
-        })
-      }
-
-      collectedReceiptsRef.current = []
-      setCollectedReceipts([])
-      receiptImageRef.current = null
-    }, totalDelay)
-  }, [addMessage])
-
   const handleSubmit = useCallback(
     (summaryFields: { label: string; value: string }[]) => {
       setMessages((prev) => prev.filter((m) => m.type !== "summary"))
@@ -638,6 +778,7 @@ export function ExpenseChatShell() {
       const updated = [...collectedReceiptsRef.current, newReceipt]
       collectedReceiptsRef.current = updated
       setCollectedReceipts(updated)
+      extractedRef.current = {}
 
       setTimeout(() => {
         addMessage({
