@@ -146,6 +146,8 @@ export function ExpenseChatShell() {
   const expectedFieldRef = useRef<keyof ExtractedReceipt | null>(null)
   const includedRaderRef = useRef<LineItem[] | null>(null)
   const kategoriConfirmedRef = useRef(false)
+  const deltagareSkippedRef = useRef(false)
+  const [deltagareOptional, setDeltagareOptional] = useState(false)
 
   const [hasCamera, setHasCamera] = useState(false)
   const cameraInputRef = useRef<HTMLInputElement>(null)
@@ -193,6 +195,8 @@ export function ExpenseChatShell() {
     expectedFieldRef.current = null
     includedRaderRef.current = null
     kategoriConfirmedRef.current = false
+    deltagareSkippedRef.current = false
+    setDeltagareOptional(false)
     receiptImagesRef.current = []
     pendingReceiptImageRef.current = null
     setIsProcessing(false)
@@ -315,6 +319,7 @@ export function ExpenseChatShell() {
         // AI-extraherat värde så deltagare-prompten alltid kör.
         if (chosen.startsWith("Representation")) {
           extractedRef.current = { ...extractedRef.current, deltagare: undefined }
+          deltagareSkippedRef.current = false
         }
         acceptAnswer("kategori", chosen, chosen)
       })
@@ -323,6 +328,9 @@ export function ExpenseChatShell() {
     const promptDeltagare = () => {
       expectedFieldRef.current = "deltagare"
       const category = extractedRef.current.kategori
+      const isRepresentation =
+        category === "Representation, intern" || category === "Representation, extern"
+      setDeltagareOptional(!isRepresentation)
       if (category === "Representation, extern") {
         addMessage({
           id: uid(),
@@ -336,7 +344,7 @@ export function ExpenseChatShell() {
       const body =
         category === "Representation, intern"
           ? "Vilka interna deltagare var med? Välj ur listan."
-          : "Vilka var med på utlägget? Välj ur listan eller skriv egna namn."
+          : "Vilka var med på utlägget? Välj ur listan, skriv egna namn — eller hoppa över om det inte är relevant."
       addMessage({ id: uid(), role: "assistant", type: "text", body })
       setChipMode(true)
       setSelectedChips([])
@@ -352,6 +360,7 @@ export function ExpenseChatShell() {
           promptKategori()
           return
         }
+        if (entry.key === "deltagare" && deltagareSkippedRef.current) continue
         if (e[entry.key]) continue
 
         switch (entry.key) {
@@ -457,6 +466,7 @@ export function ExpenseChatShell() {
       extractedRef.current = extracted
       includedRaderRef.current = extracted.rader ?? null
       kategoriConfirmedRef.current = false
+      deltagareSkippedRef.current = false
 
       animateScanFields(scanId, extracted, runStepEngine)
     },
@@ -602,6 +612,8 @@ export function ExpenseChatShell() {
       includedRaderRef.current = null
       pendingReceiptImageRef.current = null
       kategoriConfirmedRef.current = false
+      deltagareSkippedRef.current = false
+      setDeltagareOptional(false)
       clearSuggestions()
       clearAttachment()
       setIsProcessing(false)
@@ -916,6 +928,9 @@ export function ExpenseChatShell() {
         if (keyByLabel === "kategori") {
           kategoriConfirmedRef.current = false
         }
+        if (keyByLabel === "deltagare") {
+          deltagareSkippedRef.current = false
+        }
       }
       setTimeout(runStepEngine, 100)
     },
@@ -925,6 +940,15 @@ export function ExpenseChatShell() {
   const handleLineItemsChange = useCallback((included: LineItem[]) => {
     includedRaderRef.current = included
   }, [])
+
+  const handleSkipDeltagare = useCallback(() => {
+    deltagareSkippedRef.current = true
+    expectedFieldRef.current = null
+    addMessage({ id: uid(), role: "user", type: "text", body: "Inga deltagare" })
+    clearSuggestions()
+    pushProgressCard()
+    setTimeout(runStepEngine, 300)
+  }, [addMessage, clearSuggestions, pushProgressCard, runStepEngine])
 
   const handleSubmit = useCallback(
     (summaryFields: { label: string; value: string }[]) => {
@@ -958,6 +982,8 @@ export function ExpenseChatShell() {
       extractedRef.current = {}
       includedRaderRef.current = null
       kategoriConfirmedRef.current = false
+      deltagareSkippedRef.current = false
+      setDeltagareOptional(false)
 
       setTimeout(() => {
         addMessage({
@@ -1200,6 +1226,18 @@ export function ExpenseChatShell() {
                 onSubmit={handlePromptSubmit}
                 className="rounded-md border-border/80 bg-background/70 px-4 py-3 shadow-none backdrop-blur-xl"
               >
+                {chipMode && deltagareOptional && (
+                  <div className="mb-2">
+                    <button
+                      type="button"
+                      onClick={handleSkipDeltagare}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-border px-3 py-1 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                    >
+                      Hoppa över deltagare
+                    </button>
+                  </div>
+                )}
+
                 {chipMode && selectedChips.length > 0 && (
                   <div className="mb-2 flex flex-wrap gap-1.5">
                     {selectedChips.map((chip) => (
