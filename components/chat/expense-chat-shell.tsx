@@ -33,24 +33,28 @@ import {
   CATEGORIES,
   EMPLOYEES,
   INITIAL_SCAN_FIELDS,
-  SCANNED_FIELDS,
   type CollectedReceipt,
   type ExpenseMessage,
   type GeneratingStep,
   type ScanField,
 } from "@/lib/mock-expense-chat"
 
-const MODO_FACTS = [
-  "MODO Hockey grundades 1921 och är en av Sveriges äldsta hockeyklubbar.",
-  "Örnsköldsvik har producerat fler NHL-spelare per capita än nästan någon annan stad i världen.",
-  "Peter Forsberg, en av NHL:s genom tiderna bästa spelare, är uppvuxen i Örnsköldsvik och spelade för MODO.",
-  "Henrik och Daniel Sedin, tvillinglegenderna från Vancouver Canucks, kommer från Örnsköldsvik och fostrades i MODO.",
-  "MODO har vunnit SM-guld tre gånger: 1979, 1995 och 2007.",
-  "Klubbens smeknamn är 'Laget från norr' och hemmaarena heter Fjällräven Center.",
-  "Victor Hedman, backen i Tampa Bay Lightning, är en annan Örnsköldsvikare som gått MODO-skolan.",
-  "Eric Lindros, en av 90-talets mest dominanta spelare, spelade en säsong för MODO 2000–01.",
-  "Markus Naslund, som var captain i Vancouver Canucks i sju säsonger, kom också från MODO.",
-  "Örnsköldsvik kallas ibland 'Hockeybyn' på grund av alla världsstjärnor staden producerat.",
+type ExtractedReceipt = {
+  leverantor?: string
+  datum?: string
+  belopp?: string
+  kategori?: string
+  syfte?: string
+  deltagare?: string
+}
+
+const SCAN_FIELD_KEYS: { label: string; key: keyof ExtractedReceipt }[] = [
+  { label: "Leverantör", key: "leverantor" },
+  { label: "Datum", key: "datum" },
+  { label: "Belopp", key: "belopp" },
+  { label: "Kategori", key: "kategori" },
+  { label: "Syfte", key: "syfte" },
+  { label: "Deltagare", key: "deltagare" },
 ]
 
 function uid() {
@@ -84,6 +88,8 @@ export function ExpenseChatShell() {
   const [collectedReceipts, setCollectedReceipts] = useState<CollectedReceipt[]>([])
   const collectedReceiptsRef = useRef<CollectedReceipt[]>([])
 
+  const extractedRef = useRef<ExtractedReceipt>({})
+
   const [hasCamera, setHasCamera] = useState(false)
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -97,6 +103,12 @@ export function ExpenseChatShell() {
 
   const addMessage = useCallback((msg: ExpenseMessage) => {
     setMessages((prev) => [...prev, msg])
+  }, [])
+
+  const updateTextMessage = useCallback((id: string, body: string) => {
+    setMessages((prev) =>
+      prev.map((m) => (m.id === id && m.type === "text" ? { ...m, body } : m))
+    )
   }, [])
 
   const clearAttachment = useCallback(() => {
@@ -121,6 +133,7 @@ export function ExpenseChatShell() {
     setPrompt("")
     collectedReceiptsRef.current = []
     setCollectedReceipts([])
+    extractedRef.current = {}
   }, [clearAttachment])
 
   const showSuggestions = useCallback((opts: string[], action: (value: string) => void) => {
@@ -135,22 +148,23 @@ export function ExpenseChatShell() {
     setSelectedChips([])
   }, [])
 
-  // --- Category handling ---
+  // --- Summary ---
 
   const showSummary = useCallback(
     (category: string, participantValue: string) => {
-      addMessage({
-        id: uid(),
-        role: "assistant",
-        type: "summary",
-        fields: [
-          { label: "Leverantör", value: "Restaurant Kronborg" },
-          { label: "Datum", value: "2026-05-03" },
-          { label: "Belopp", value: "1 240 SEK" },
-          { label: "Kategori", value: category },
-          ...(participantValue !== "–" ? [{ label: "Deltagare", value: participantValue }] : []),
-        ],
-      })
+      const e = extractedRef.current
+      const fields: { label: string; value: string }[] = []
+      if (e.leverantor) fields.push({ label: "Leverantör", value: e.leverantor })
+      if (e.datum) fields.push({ label: "Datum", value: e.datum })
+      if (e.belopp) fields.push({ label: "Belopp", value: e.belopp })
+      fields.push({ label: "Kategori", value: category })
+      if (e.syfte && !["Representation, intern", "Representation, extern"].includes(category)) {
+        fields.push({ label: "Syfte", value: e.syfte })
+      }
+      if (participantValue !== "–") {
+        fields.push({ label: "Deltagare", value: participantValue })
+      }
+      addMessage({ id: uid(), role: "assistant", type: "summary", fields })
     },
     [addMessage]
   )
@@ -162,6 +176,33 @@ export function ExpenseChatShell() {
       setTimeout(() => showSummary(category, participantValue), 400)
     },
     [addMessage, clearSuggestions, showSummary]
+  )
+
+  const askForParticipants = useCallback(
+    (category: string) => {
+      if (category === "Representation, extern") {
+        addMessage({
+          id: uid(),
+          role: "assistant",
+          type: "text",
+          body: "Ange externa deltagare (namn och företag):",
+        })
+        showSuggestions([], (value) => handleParticipantInput(value, category))
+        return
+      }
+
+      const body =
+        category === "Representation, intern"
+          ? "Vilka interna deltagare var med? Välj ur listan."
+          : "Vilka var med på utlägget? Välj ur listan eller skriv egna namn."
+
+      addMessage({ id: uid(), role: "assistant", type: "text", body })
+      setChipMode(true)
+      setSelectedChips([])
+      showSuggestions(EMPLOYEES, () => {})
+      setPendingAction(() => (value: string) => handleParticipantInput(value, category))
+    },
+    [addMessage, showSuggestions, handleParticipantInput]
   )
 
   const handleCategoryInput = useCallback(
@@ -177,25 +218,8 @@ export function ExpenseChatShell() {
       const isExtern = category === "Representation, extern"
 
       setTimeout(() => {
-        if (isIntern) {
-          addMessage({
-            id: uid(),
-            role: "assistant",
-            type: "text",
-            body: "Vilka interna deltagare var med? Välj ur listan.",
-          })
-          setChipMode(true)
-          setSelectedChips([])
-          showSuggestions(EMPLOYEES, () => {})
-          setPendingAction(() => (value: string) => handleParticipantInput(value, label))
-        } else if (isExtern) {
-          addMessage({
-            id: uid(),
-            role: "assistant",
-            type: "text",
-            body: "Ange externa deltagare (namn och företag):",
-          })
-          showSuggestions([], (value) => handleParticipantInput(value, label))
+        if (isIntern || isExtern) {
+          askForParticipants(label)
         } else if (category === "Övrigt") {
           addMessage({
             id: uid(),
@@ -213,30 +237,15 @@ export function ExpenseChatShell() {
         }
       }, 400)
     },
-    [addMessage, clearSuggestions, showSummary, showSuggestions, handleParticipantInput]
+    [addMessage, clearSuggestions, showSummary, showSuggestions, askForParticipants]
   )
 
-  // --- Scan flow ---
+  const continueAfterScan = useCallback(
+    (extracted: ExtractedReceipt) => {
+      const category = extracted.kategori
+      const deltagare = extracted.deltagare
 
-  const startScanFlow = useCallback(
-    (file: File) => {
-      const scanId = uid()
-      const initialFields = INITIAL_SCAN_FIELDS.map((f) => ({ ...f }))
-      setScanFields(initialFields)
-
-      addMessage({ id: uid(), role: "user", type: "text", body: `Laddar upp: ${file.name}` })
-      addMessage({ id: scanId, role: "assistant", type: "scanning", fields: initialFields })
-
-      SCANNED_FIELDS.forEach((field, i) => {
-        setTimeout(() => {
-          setScanFields((prev) =>
-            prev.map((f) => (f.label === field.label ? { ...field } : f))
-          )
-        }, 600 + i * 500)
-      })
-
-      const totalDelay = 600 + SCANNED_FIELDS.length * 500 + 600
-      setTimeout(() => {
+      if (!category) {
         addMessage({
           id: uid(),
           role: "assistant",
@@ -244,9 +253,82 @@ export function ExpenseChatShell() {
           body: "Jag kunde inte identifiera kategori. Välj den som stämmer bäst:",
         })
         showSuggestions(CATEGORIES, handleCategoryInput)
-      }, totalDelay)
+        return
+      }
+
+      const isRepr =
+        category === "Representation, intern" ||
+        category === "Representation, extern"
+
+      // Always ask for representation receipts (extracted deltagare on receipts
+      // is unreliable). For other categories, only ask when deltagare is missing.
+      if (isRepr || !deltagare) {
+        askForParticipants(category)
+        return
+      }
+
+      showSummary(category, deltagare)
     },
-    [addMessage, showSuggestions, handleCategoryInput]
+    [addMessage, showSuggestions, handleCategoryInput, askForParticipants, showSummary]
+  )
+
+  // --- Scan flow ---
+
+  const animateScanFields = useCallback(
+    (extracted: ExtractedReceipt, onDone: () => void) => {
+      SCAN_FIELD_KEYS.forEach((entry, i) => {
+        setTimeout(() => {
+          const value = extracted[entry.key]
+          setScanFields((prev) =>
+            prev.map((f) =>
+              f.label === entry.label
+                ? value
+                  ? { label: entry.label, status: "found", value }
+                  : { label: entry.label, status: "missing" }
+                : f
+            )
+          )
+        }, 300 + i * 250)
+      })
+      setTimeout(onDone, 300 + SCAN_FIELD_KEYS.length * 250 + 300)
+    },
+    []
+  )
+
+  const startScanFlow = useCallback(
+    async (file: File) => {
+      const scanId = uid()
+      const initialFields = INITIAL_SCAN_FIELDS.map((f) => ({ ...f }))
+      setScanFields(initialFields)
+
+      addMessage({ id: uid(), role: "user", type: "text", body: `Laddar upp: ${file.name}` })
+      addMessage({ id: scanId, role: "assistant", type: "scanning", fields: initialFields })
+
+      let extracted: ExtractedReceipt = {}
+      try {
+        const form = new FormData()
+        form.append("file", file)
+        const res = await fetch("/api/extract-receipt", { method: "POST", body: form })
+        if (!res.ok) throw new Error(`status ${res.status}`)
+        const json = (await res.json()) as { fields?: ExtractedReceipt }
+        extracted = json.fields ?? {}
+      } catch (err) {
+        console.error("extract-receipt error", err)
+        setScanFields((prev) => prev.map((f) => ({ ...f, status: "missing" })))
+        addMessage({
+          id: uid(),
+          role: "assistant",
+          type: "text",
+          body: "Jag kunde inte läsa kvittot. Försök ladda upp en tydligare bild.",
+        })
+        return
+      }
+
+      extractedRef.current = extracted
+
+      animateScanFields(extracted, () => continueAfterScan(extracted))
+    },
+    [addMessage, animateScanFields, continueAfterScan]
   )
 
   // --- File input ---
@@ -323,6 +405,40 @@ export function ExpenseChatShell() {
     return () => window.removeEventListener("paste", onPaste)
   }, [acceptFile])
 
+  // --- Free-text chat ---
+
+  const streamFreeTextReply = useCallback(
+    async (userPrompt: string) => {
+      const replyId = uid()
+      addMessage({ id: replyId, role: "assistant", type: "text", body: "" })
+
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: userPrompt }),
+        })
+        if (!res.ok || !res.body) throw new Error(`status ${res.status}`)
+
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let acc = ""
+        while (true) {
+          const { value, done } = await reader.read()
+          if (done) break
+          acc += decoder.decode(value, { stream: true })
+          updateTextMessage(replyId, acc)
+        }
+        acc += decoder.decode()
+        if (acc) updateTextMessage(replyId, acc)
+      } catch (err) {
+        console.error("chat stream error", err)
+        updateTextMessage(replyId, "Något gick fel hos assistenten. Försök igen.")
+      }
+    },
+    [addMessage, updateTextMessage]
+  )
+
   // --- Send ---
 
   const addChip = useCallback((name: string) => {
@@ -351,26 +467,29 @@ export function ExpenseChatShell() {
     }
 
     if (attachedFile) {
-      startScanFlow(attachedFile)
-      clearAttachment()
+      const file = attachedFile
       setPrompt("")
+      clearAttachment()
+      void startScanFlow(file)
       return
     }
 
     if (value) {
       addMessage({ id: uid(), role: "user", type: "text", body: value })
       setPrompt("")
-      const fact = MODO_FACTS[Math.floor(Math.random() * MODO_FACTS.length)]
-      setTimeout(() => {
-        addMessage({
-          id: uid(),
-          role: "assistant",
-          type: "text",
-          body: `Det där kan jag tyvärr inte hjälpa med. Men visste du att: _${fact}_`,
-        })
-      }, 600)
+      void streamFreeTextReply(value)
     }
-  }, [prompt, chipMode, selectedChips, pendingAction, attachedFile, startScanFlow, clearAttachment, addMessage])
+  }, [
+    prompt,
+    chipMode,
+    selectedChips,
+    pendingAction,
+    attachedFile,
+    startScanFlow,
+    clearAttachment,
+    addMessage,
+    streamFreeTextReply,
+  ])
 
   // --- PDF generation ---
 
