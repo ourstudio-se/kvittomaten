@@ -943,6 +943,16 @@ export function ExpenseChatShell() {
                         </button>
                       </span>
                     ))}
+                    {selectedChips.length >= 5 && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedChips([])}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-border px-3 py-1 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                      >
+                        <X className="size-3" />
+                        Rensa deltagare
+                      </button>
+                    )}
                   </div>
                 )}
 
