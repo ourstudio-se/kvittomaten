@@ -638,31 +638,37 @@ export function ExpenseChatShell() {
           <footer className="fixed inset-x-0 bottom-0 px-screen-edge pb-6 lg:px-8">
             <div className="mx-auto max-w-[800px]">
               {suggestions.length > 0 && (
-                <div className="mb-2 flex flex-wrap gap-2">
-                  {suggestions
-                    .filter(
-                      (s) =>
-                        !selectedChips.includes(s) &&
-                        s.toLowerCase().includes(prompt.toLowerCase())
-                    )
-                    .map((s) => (
-                      <PromptSuggestion
-                        key={s}
-                        size="sm"
-                        highlight={chipMode ? undefined : prompt}
-                        onClick={() => {
-                          if (chipMode) {
-                            addChip(s)
-                          } else {
-                            pendingAction?.(s)
-                            setPrompt("")
-                            clearSuggestions()
-                          }
-                        }}
-                      >
-                        {s}
-                      </PromptSuggestion>
-                    ))}
+                <div className="relative mb-2">
+                  <div
+                    aria-hidden
+                    className="pointer-events-none absolute -inset-x-6 -top-10 bottom-0 rounded-3xl bg-gradient-to-t from-background via-background/85 to-transparent backdrop-blur-sm"
+                  />
+                  <div className="relative flex flex-wrap gap-2 px-1 py-1">
+                    {suggestions
+                      .filter(
+                        (s) =>
+                          !selectedChips.includes(s) &&
+                          s.toLowerCase().includes(prompt.toLowerCase())
+                      )
+                      .map((s) => (
+                        <PromptSuggestion
+                          key={s}
+                          size="sm"
+                          highlight={chipMode ? undefined : prompt}
+                          onClick={() => {
+                            if (chipMode) {
+                              addChip(s)
+                            } else {
+                              pendingAction?.(s)
+                              setPrompt("")
+                              clearSuggestions()
+                            }
+                          }}
+                        >
+                          {s}
+                        </PromptSuggestion>
+                      ))}
+                  </div>
                 </div>
               )}
 
