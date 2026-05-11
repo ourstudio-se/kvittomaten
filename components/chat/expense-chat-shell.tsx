@@ -905,6 +905,16 @@ export function ExpenseChatShell() {
           <div className="flex min-h-0 flex-1">
             <ChatContainerRoot className="h-full w-full">
               <ChatContainerContent className="mx-auto w-full max-w-[800px] space-y-between-cards px-screen-edge pt-10 pb-44 lg:px-8 lg:pb-32">
+                  {messages.length === 0 && (
+                    <div className="flex flex-col items-center justify-center gap-3 pt-16 text-center sm:pt-24">
+                      <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+                        Hej!
+                      </h1>
+                      <p className="max-w-md text-base text-muted-foreground">
+                        Lägg till eller fotografera ditt kvitto direkt här i chatten så hjälper jag dig att bokföra det.
+                      </p>
+                    </div>
+                  )}
                   {messages.map((message) => {
                     if (message.type === "text") {
                       return (
