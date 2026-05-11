@@ -41,7 +41,7 @@ type Props = {
   className?: string
 }
 
-const COLLAPSIBLE_THRESHOLD = 4
+const AMOUNT_LABELS = new Set(["Belopp", "Originalbelopp", "Belopp (SEK)"])
 
 export function SummaryCard({
   fields: initialFields,
@@ -62,7 +62,6 @@ export function SummaryCard({
 
   const isForeign = currency !== "SEK" && exchangeRate != null && exchangeRate > 0
   const hasLineItems = lineItems != null && lineItems.length > 0
-  const useCollapsible = hasLineItems && lineItems.length > COLLAPSIBLE_THRESHOLD
 
   const startEdit = (i: number) => {
     setEditingIndex(i)
@@ -171,78 +170,96 @@ export function SummaryCard({
   const excludedCount = excluded.size
   const includedCount = hasLineItems ? lineItems.length - excludedCount : 0
 
-  return (
-    <div className={cn("space-y-4", className)}>
-      <div className="overflow-hidden rounded-md border border-border bg-card">
-        {fields.map((field, i) => {
-          const isFlowField = flowFields.includes(field.label)
+  const renderFieldRow = (field: Field, i: number, isFirst: boolean) => {
+    const isFlowField = flowFields.includes(field.label)
+    return (
+      <div
+        key={field.label}
+        className={cn(
+          "group flex items-center gap-3 px-4 py-2.5 text-sm",
+          !isFirst && "border-t border-border"
+        )}
+      >
+        <span className="w-28 shrink-0 text-muted-foreground">{field.label}</span>
 
-          return (
-            <div
-              key={field.label}
-              className={cn(
-                "group flex items-center gap-3 px-4 py-2.5 text-sm",
-                i !== 0 && "border-t border-border"
-              )}
-            >
-              <span className="w-28 shrink-0 text-muted-foreground">{field.label}</span>
-
-              {editingIndex === i ? (
-                <input
-                  autoFocus
-                  value={editValue}
-                  onChange={(e) => setEditValue(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  className="flex-1 bg-transparent font-medium outline-none"
-                />
-              ) : (
-                <span className="flex-1 font-medium">{field.value}</span>
-              )}
-
-              {editingIndex === i ? (
-                <button
-                  onClick={commitEdit}
-                  className="shrink-0 text-primary hover:opacity-70"
-                  aria-label="Spara"
-                >
-                  <Check className="size-3.5" />
-                </button>
-              ) : (
-                <button
-                  onClick={() => isFlowField ? onEditField?.(field.label) : startEdit(i)}
-                  className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
-                  aria-label={`Ändra ${field.label}`}
-                >
-                  <Pencil className="size-3.5" />
-                </button>
-              )}
-            </div>
-          )
-        })}
-
-        {hasLineItems && !useCollapsible && (
-          <>
-            <div className="border-t border-border bg-muted/20 px-4 py-2 text-xs font-medium text-muted-foreground">
-              Rader
-            </div>
-            {lineItemRows}
-          </>
+        {editingIndex === i ? (
+          <input
+            autoFocus
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onKeyDown={handleKeyDown}
+            className="flex-1 bg-transparent font-medium outline-none"
+          />
+        ) : (
+          <span className="flex-1 font-medium">{field.value}</span>
         )}
 
-        {hasLineItems && useCollapsible && (
-          <Collapsible open={raderOpen} onOpenChange={setRaderOpen}>
-            <CollapsibleTrigger className="flex w-full items-center justify-between border-t border-border bg-muted/20 px-4 py-2 text-xs font-medium text-muted-foreground hover:bg-muted/40 transition-colors">
-              <span>
-                Rader ({includedCount} av {lineItems.length}{excludedCount > 0 ? `, ${excludedCount} exkluderade` : ""})
-              </span>
-              <ChevronDown className={cn("size-3.5 transition-transform", raderOpen && "rotate-180")} />
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              {lineItemRows}
-            </CollapsibleContent>
-          </Collapsible>
+        {editingIndex === i ? (
+          <button
+            onClick={commitEdit}
+            className="shrink-0 text-primary hover:opacity-70"
+            aria-label="Spara"
+          >
+            <Check className="size-3.5" />
+          </button>
+        ) : (
+          <button
+            onClick={() =>
+              isFlowField ? onEditField?.(field.label) : startEdit(i)
+            }
+            className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+            aria-label={`Ändra ${field.label}`}
+          >
+            <Pencil className="size-3.5" />
+          </button>
         )}
       </div>
+    )
+  }
+
+  const infoFields = fields
+    .map((f, i) => ({ field: f, index: i }))
+    .filter(({ field }) => !AMOUNT_LABELS.has(field.label))
+  const amountFields = fields
+    .map((f, i) => ({ field: f, index: i }))
+    .filter(({ field }) => AMOUNT_LABELS.has(field.label))
+
+  return (
+    <div className={cn("space-y-3", className)}>
+      {infoFields.length > 0 && (
+        <div className="overflow-hidden rounded-md border border-border bg-card">
+          {infoFields.map(({ field, index }, i) =>
+            renderFieldRow(field, index, i === 0)
+          )}
+        </div>
+      )}
+
+      {(amountFields.length > 0 || hasLineItems) && (
+        <div className="overflow-hidden rounded-md border border-border bg-card">
+          {hasLineItems && (
+            <Collapsible open={raderOpen} onOpenChange={setRaderOpen}>
+              <CollapsibleTrigger className="flex w-full items-center justify-between bg-muted/20 px-4 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/40">
+                <span>
+                  Rader ({includedCount} av {lineItems.length}
+                  {excludedCount > 0 ? `, ${excludedCount} exkluderade` : ""})
+                </span>
+                <ChevronDown
+                  className={cn(
+                    "size-3.5 transition-transform",
+                    raderOpen && "rotate-180"
+                  )}
+                />
+              </CollapsibleTrigger>
+              <CollapsibleContent>{lineItemRows}</CollapsibleContent>
+            </Collapsible>
+          )}
+
+          {amountFields.map(({ field, index }, i) =>
+            renderFieldRow(field, index, !hasLineItems && i === 0)
+          )}
+        </div>
+      )}
+
       <Button className="w-full rounded-md" onClick={() => onSubmit(fields)}>
         Lägg till kvitto
       </Button>
