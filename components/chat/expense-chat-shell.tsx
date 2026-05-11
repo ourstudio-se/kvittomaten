@@ -98,6 +98,7 @@ function shouldRouteToIntent(
   if (COMMAND_PREFIX.test(t)) return true
   if (field === "datum" && !/^\d{4}-\d{1,2}-\d{1,2}$/.test(t)) return true
   if (field === "belopp" && !/\d/.test(t)) return true
+  if (field === "kategori" && !CATEGORIES.includes(t)) return true
   return false
 }
 
