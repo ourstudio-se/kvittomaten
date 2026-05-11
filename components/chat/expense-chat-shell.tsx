@@ -48,7 +48,6 @@ type ExtractedReceipt = {
   valuta?: string
   belopp_sek?: string
   kategori?: string
-  syfte?: string
   deltagare?: string
   rader?: LineItem[]
 }
@@ -57,10 +56,7 @@ const SCAN_FIELD_KEYS: { label: string; key: keyof ExtractedReceipt }[] = [
   { label: "Leverantör", key: "leverantor" },
   { label: "Datum", key: "datum" },
   { label: "Belopp", key: "belopp" },
-  { label: "Valuta", key: "valuta" },
-  { label: "Belopp (SEK)", key: "belopp_sek" },
   { label: "Kategori", key: "kategori" },
-  { label: "Syfte", key: "syfte" },
   { label: "Deltagare", key: "deltagare" },
 ]
 
@@ -72,6 +68,22 @@ function isImageFile(file: File) {
   return file.type.startsWith("image/")
 }
 
+const COMMAND_PREFIX = /^(kan vi|kan du|byt|ändra|ångra|avbryt|fel|glöm|nytt|starta|gör|ny|skapa|generera|exportera|skicka|nollställ|börja|stäng)\b/i
+
+function shouldRouteToIntent(
+  value: string,
+  field: keyof ExtractedReceipt
+): boolean {
+  const t = value.trim()
+  if (!t) return false
+  if (t.includes("?")) return true
+  if (t.length > 60) return true
+  if (COMMAND_PREFIX.test(t)) return true
+  if (field === "datum" && !/^\d{4}-\d{1,2}-\d{1,2}$/.test(t)) return true
+  if (field === "belopp" && !/\d/.test(t)) return true
+  return false
+}
+
 const GENERATION_STEPS: GeneratingStep[] = [
   { label: "Sammanställer uppgifter", status: "pending" },
   { label: "Formaterar kvittodokument", status: "pending" },
@@ -81,7 +93,6 @@ const GENERATION_STEPS: GeneratingStep[] = [
 export function ExpenseChatShell() {
   const [prompt, setPrompt] = useState("")
   const [messages, setMessages] = useState<ExpenseMessage[]>([])
-  const [scanFields, setScanFields] = useState<ScanField[]>([])
   const [participants, setParticipants] = useState("")
   const [participantMessageId, setParticipantMessageId] = useState<string | null>(null)
   const [attachedFile, setAttachedFile] = useState<File | null>(null)
@@ -98,6 +109,7 @@ export function ExpenseChatShell() {
   const receiptImagesRef = useRef<File[]>([])
 
   const extractedRef = useRef<ExtractedReceipt>({})
+  const expectedFieldRef = useRef<keyof ExtractedReceipt | null>(null)
   const includedRaderRef = useRef<LineItem[] | null>(null)
 
   const [hasCamera, setHasCamera] = useState(false)
@@ -131,7 +143,6 @@ export function ExpenseChatShell() {
 
   const handleNewChat = useCallback(() => {
     setMessages([])
-    setScanFields([])
     setParticipants("")
     setParticipantMessageId(null)
     clearAttachment()
@@ -144,6 +155,7 @@ export function ExpenseChatShell() {
     collectedReceiptsRef.current = []
     setCollectedReceipts([])
     extractedRef.current = {}
+    expectedFieldRef.current = null
     includedRaderRef.current = null
     receiptImagesRef.current = []
     setIsProcessing(false)
@@ -163,44 +175,91 @@ export function ExpenseChatShell() {
 
   // --- Summary ---
 
-  const showSummary = useCallback(
-    (category: string, participantValue: string) => {
-      const e = extractedRef.current
-      const fields: { label: string; value: string }[] = []
-      if (e.leverantor) fields.push({ label: "Leverantör", value: e.leverantor })
-      if (e.datum) fields.push({ label: "Datum", value: e.datum })
+  const buildScanSnapshot = useCallback((): ScanField[] => {
+    return SCAN_FIELD_KEYS.map((entry) => {
+      const raw = extractedRef.current[entry.key]
+      const value = typeof raw === "string" ? raw : undefined
+      return value
+        ? { label: entry.label, status: "found", value }
+        : { label: entry.label, status: "missing" }
+    })
+  }, [])
 
-      const isForeign = e.valuta && e.valuta !== "SEK"
-      if (isForeign && e.belopp) {
-        fields.push({ label: "Originalbelopp", value: e.belopp })
-        if (e.belopp_sek) fields.push({ label: "Belopp (SEK)", value: e.belopp_sek })
-      } else if (e.belopp) {
-        fields.push({ label: "Belopp", value: e.belopp })
-      }
+  const pushProgressCard = useCallback(() => {
+    addMessage({
+      id: uid(),
+      role: "assistant",
+      type: "scanning",
+      fields: buildScanSnapshot(),
+    })
+  }, [addMessage, buildScanSnapshot])
 
-      fields.push({ label: "Kategori", value: category })
-      if (e.syfte && !["Representation, intern", "Representation, extern"].includes(category)) {
-        fields.push({ label: "Syfte", value: e.syfte })
-      }
-      if (participantValue !== "–") {
-        fields.push({ label: "Deltagare", value: participantValue })
-      }
-      addMessage({ id: uid(), role: "assistant", type: "summary", fields })
-    },
-    [addMessage]
-  )
+  const showSummary = useCallback(() => {
+    const e = extractedRef.current
+    const category = e.kategori ?? "Övrigt"
 
-  const handleParticipantInput = useCallback(
-    (participantValue: string, category: string) => {
-      addMessage({ id: uid(), role: "user", type: "text", body: participantValue })
+    const fields: { label: string; value: string }[] = []
+    if (e.leverantor) fields.push({ label: "Leverantör", value: e.leverantor })
+    if (e.datum) fields.push({ label: "Datum", value: e.datum })
+
+    const isForeign = e.valuta && e.valuta !== "SEK"
+    if (isForeign && e.belopp) {
+      fields.push({ label: "Originalbelopp", value: e.belopp })
+      if (e.belopp_sek) fields.push({ label: "Belopp (SEK)", value: e.belopp_sek })
+    } else if (e.belopp) {
+      fields.push({ label: "Belopp", value: e.belopp })
+    }
+
+    fields.push({ label: "Kategori", value: category })
+    if (e.deltagare) fields.push({ label: "Deltagare", value: e.deltagare })
+
+    addMessage({ id: uid(), role: "assistant", type: "summary", fields })
+  }, [addMessage])
+
+  // --- Step engine: walk through missing fields one at a time ---
+
+  const runStepEngine = useCallback(() => {
+    const acceptAnswer = (
+      key: keyof ExtractedReceipt,
+      displayValue: string,
+      storedValue: string
+    ) => {
+      expectedFieldRef.current = null
+      addMessage({ id: uid(), role: "user", type: "text", body: displayValue })
       clearSuggestions()
-      setTimeout(() => showSummary(category, participantValue), 400)
-    },
-    [addMessage, clearSuggestions, showSummary]
-  )
+      extractedRef.current = { ...extractedRef.current, [key]: storedValue }
+      pushProgressCard()
+      setTimeout(next, 400)
+    }
 
-  const askForParticipants = useCallback(
-    (category: string) => {
+    const promptText = (key: keyof ExtractedReceipt, body: string) => {
+      expectedFieldRef.current = key
+      addMessage({ id: uid(), role: "assistant", type: "text", body })
+      showSuggestions([], (value) => acceptAnswer(key, value, value))
+    }
+
+    const promptKategori = () => {
+      expectedFieldRef.current = "kategori"
+      addMessage({
+        id: uid(),
+        role: "assistant",
+        type: "text",
+        body: "Vilken kategori passar utlägget? Välj från listan eller skriv eget.",
+      })
+      showSuggestions(CATEGORIES, (raw) => {
+        if (CATEGORIES.includes(raw)) {
+          acceptAnswer("kategori", raw, raw)
+        } else {
+          // Free-text → store as Övrigt with the typed description as suffix
+          const label = `Övrigt – ${raw}`
+          acceptAnswer("kategori", label, label)
+        }
+      })
+    }
+
+    const promptDeltagare = () => {
+      expectedFieldRef.current = "deltagare"
+      const category = extractedRef.current.kategori
       if (category === "Representation, extern") {
         addMessage({
           id: uid(),
@@ -208,114 +267,70 @@ export function ExpenseChatShell() {
           type: "text",
           body: "Ange externa deltagare (namn och företag):",
         })
-        showSuggestions([], (value) => handleParticipantInput(value, category))
+        showSuggestions([], (value) => acceptAnswer("deltagare", value, value))
         return
       }
-
       const body =
         category === "Representation, intern"
           ? "Vilka interna deltagare var med? Välj ur listan."
           : "Vilka var med på utlägget? Välj ur listan eller skriv egna namn."
-
       addMessage({ id: uid(), role: "assistant", type: "text", body })
       setChipMode(true)
       setSelectedChips([])
       showSuggestions(EMPLOYEES, () => {})
-      setPendingAction(() => (value: string) => handleParticipantInput(value, category))
-    },
-    [addMessage, showSuggestions, handleParticipantInput]
-  )
+      setPendingAction(() => (value: string) => acceptAnswer("deltagare", value, value))
+    }
 
-  const handleCategoryInput = useCallback(
-    (rawInput: string) => {
-      const isKnown = CATEGORIES.includes(rawInput)
-      const category = isKnown ? rawInput : "Övrigt"
-      const label = isKnown ? rawInput : `Övrigt – ${rawInput}`
+    function next() {
+      const e = extractedRef.current
+      for (const entry of SCAN_FIELD_KEYS) {
+        if (e[entry.key]) continue
 
-      addMessage({ id: uid(), role: "user", type: "text", body: label })
-      clearSuggestions()
-
-      const isIntern = category === "Representation, intern"
-      const isExtern = category === "Representation, extern"
-
-      setTimeout(() => {
-        if (isIntern || isExtern) {
-          askForParticipants(label)
-        } else if (category === "Övrigt") {
-          addMessage({
-            id: uid(),
-            role: "assistant",
-            type: "text",
-            body: "Beskriv kort vad utlägget avser:",
-          })
-          showSuggestions([], (value) => {
-            addMessage({ id: uid(), role: "user", type: "text", body: value })
-            clearSuggestions()
-            setTimeout(() => showSummary(`Övrigt – ${value}`, "–"), 400)
-          })
-        } else {
-          showSummary(label, "–")
+        switch (entry.key) {
+          case "leverantor":
+            promptText("leverantor", "Vad är leverantörens namn?")
+            return
+          case "datum":
+            promptText("datum", "Vilket datum gjordes inköpet? (YYYY-MM-DD)")
+            return
+          case "belopp":
+            promptText("belopp", "Vad är totalbeloppet (inkl. valuta)?")
+            return
+          case "kategori":
+            promptKategori()
+            return
+          case "deltagare":
+            promptDeltagare()
+            return
         }
-      }, 400)
-    },
-    [addMessage, clearSuggestions, showSummary, showSuggestions, askForParticipants]
-  )
-
-  const continueToCategory = useCallback(
-    (extracted: ExtractedReceipt) => {
-      const category = extracted.kategori
-      const deltagare = extracted.deltagare
-
-      if (!category) {
-        addMessage({
-          id: uid(),
-          role: "assistant",
-          type: "text",
-          body: "Jag kunde inte identifiera kategori. Välj den som stämmer bäst:",
-        })
-        showSuggestions(CATEGORIES, handleCategoryInput)
-        return
       }
 
-      const isRepr =
-        category === "Representation, intern" ||
-        category === "Representation, extern"
+      showSummary()
+    }
 
-      // Only ask for participants on representation receipts.
-      if (isRepr) {
-        askForParticipants(category)
-        return
-      }
-
-      showSummary(category, deltagare || "–")
-    },
-    [addMessage, showSuggestions, handleCategoryInput, askForParticipants, showSummary]
-  )
-
-  const continueAfterScan = useCallback(
-    (extracted: ExtractedReceipt) => {
-      includedRaderRef.current = extracted.rader ?? null
-      continueToCategory(extracted)
-    },
-    [continueToCategory]
-  )
+    next()
+  }, [addMessage, clearSuggestions, showSuggestions, pushProgressCard, showSummary])
 
   // --- Scan flow ---
 
   const animateScanFields = useCallback(
-    (extracted: ExtractedReceipt, onDone: () => void) => {
+    (scanMessageId: string, extracted: ExtractedReceipt, onDone: () => void) => {
       SCAN_FIELD_KEYS.forEach((entry, i) => {
         setTimeout(() => {
           const raw = extracted[entry.key]
           const value = typeof raw === "string" ? raw : undefined
-          setScanFields((prev) =>
-            prev.map((f) =>
-              f.label === entry.label
-                ? value
-                  ? { label: entry.label, status: "found", value }
-                  : { label: entry.label, status: "missing" }
-                : f
-            )
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.id !== scanMessageId || m.type !== "scanning") return m
+              const updated = m.fields.map((f) =>
+                f.label === entry.label
+                  ? value
+                    ? { label: entry.label, status: "found" as const, value }
+                    : { label: entry.label, status: "missing" as const }
+                  : f
+              )
+              return { ...m, fields: updated }
+            })
           )
         }, 300 + i * 250)
       })
@@ -329,7 +344,6 @@ export function ExpenseChatShell() {
       setIsProcessing(true)
       const scanId = uid()
       const initialFields = INITIAL_SCAN_FIELDS.map((f) => ({ ...f }))
-      setScanFields(initialFields)
 
       addMessage({ id: uid(), role: "user", type: "text", body: `Laddar upp: ${file.name}` })
       addMessage({ id: scanId, role: "assistant", type: "scanning", fields: initialFields })
@@ -344,7 +358,13 @@ export function ExpenseChatShell() {
         extracted = json.fields ?? {}
       } catch (err) {
         console.error("extract-receipt error", err)
-        setScanFields((prev) => prev.map((f) => ({ ...f, status: "missing" })))
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === scanId && m.type === "scanning"
+              ? { ...m, fields: m.fields.map((f) => ({ ...f, status: "missing" as const })) }
+              : m
+          )
+        )
         addMessage({
           id: uid(),
           role: "assistant",
@@ -356,10 +376,11 @@ export function ExpenseChatShell() {
       }
 
       extractedRef.current = extracted
+      includedRaderRef.current = extracted.rader ?? null
 
-      animateScanFields(extracted, () => continueAfterScan(extracted))
+      animateScanFields(scanId, extracted, runStepEngine)
     },
-    [addMessage, animateScanFields, continueAfterScan]
+    [addMessage, animateScanFields, runStepEngine]
   )
 
   // --- File input ---
@@ -472,6 +493,165 @@ export function ExpenseChatShell() {
     [addMessage, updateTextMessage]
   )
 
+  // --- Free-text intent (Gemini parses what the user wants) ---
+
+  type IntentAction =
+    | { action: "set_field"; field: keyof ExtractedReceipt; value: string }
+    | { action: "ask_field"; field: keyof ExtractedReceipt }
+    | { action: "generate_pdf" }
+    | { action: "add_receipt" }
+    | { action: "cancel" }
+    | { action: "off_topic" }
+
+  const cancelCurrentFlow = useCallback(
+    (note = "Avbrutet. Du kan ladda upp ett nytt kvitto.") => {
+      extractedRef.current = {}
+      expectedFieldRef.current = null
+      includedRaderRef.current = null
+      clearSuggestions()
+      clearAttachment()
+      setIsProcessing(false)
+      addMessage({ id: uid(), role: "assistant", type: "text", body: note })
+    },
+    [addMessage, clearSuggestions, clearAttachment]
+  )
+
+  const handleGeneratePdf = useCallback(() => {
+    const receipts = collectedReceiptsRef.current
+    if (receipts.length === 0) return
+
+    const gid = uid()
+    const initialSteps = GENERATION_STEPS.map((s) => ({ ...s }))
+    setGeneratingSteps(initialSteps)
+
+    setTimeout(() => {
+      addMessage({ id: gid, role: "assistant", type: "generating", steps: initialSteps })
+    }, 100)
+
+    initialSteps.forEach((_, i) => {
+      setTimeout(() => {
+        setGeneratingSteps((prev) =>
+          prev.map((s, idx) => (idx === i ? { ...s, status: "done" } : s))
+        )
+      }, 800 + i * 900)
+    })
+
+    const totalDelay = 800 + initialSteps.length * 900 + 400
+    setTimeout(async () => {
+      try {
+        const formData = new FormData()
+        formData.append("receipts", JSON.stringify(receipts))
+        for (const img of receiptImagesRef.current) {
+          formData.append("images", img)
+        }
+
+        const res = await fetch("/api/receipt/pdf", {
+          method: "POST",
+          body: formData,
+        })
+
+        if (!res.ok) {
+          throw new Error(`PDF generation failed (${res.status})`)
+        }
+
+        const blob = await res.blob()
+        const count = receipts.length
+        const filename = count === 1 ? "verifikation.pdf" : `verifikation-${count}-kvitton.pdf`
+
+        addMessage({
+          id: uid(),
+          role: "assistant",
+          type: "download",
+          filename,
+          blobUrl: URL.createObjectURL(blob),
+        })
+      } catch (err) {
+        addMessage({
+          id: uid(),
+          role: "assistant",
+          type: "text",
+          body: `Kunde inte generera PDF: ${err instanceof Error ? err.message : "Okänt fel"}`,
+        })
+      }
+
+      collectedReceiptsRef.current = []
+      setCollectedReceipts([])
+      receiptImagesRef.current = []
+    }, totalDelay)
+  }, [addMessage])
+
+  const handleIntent = useCallback(
+    async (message: string, opts?: { expectingField?: keyof ExtractedReceipt }) => {
+      addMessage({ id: uid(), role: "user", type: "text", body: message })
+
+      let result: IntentAction = { action: "off_topic" }
+      try {
+        const res = await fetch("/api/edit-receipt", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            extracted: extractedRef.current,
+            savedCount: collectedReceiptsRef.current.length,
+            expectingField: opts?.expectingField ?? null,
+            message,
+          }),
+        })
+        if (res.ok) result = (await res.json()) as IntentAction
+      } catch (err) {
+        console.error("intent error", err)
+      }
+
+      if (result.action === "set_field") {
+        extractedRef.current = {
+          ...extractedRef.current,
+          [result.field]: result.value,
+        }
+        setMessages((prev) => prev.filter((m) => m.type !== "summary"))
+        pushProgressCard()
+        // Continue the step engine — it'll prompt for whatever's still
+        // missing, or render the summary if everything is filled.
+        setTimeout(runStepEngine, 300)
+        return
+      }
+
+      if (result.action === "ask_field") {
+        extractedRef.current = {
+          ...extractedRef.current,
+          [result.field]: undefined,
+        }
+        setMessages((prev) => prev.filter((m) => m.type !== "summary"))
+        setTimeout(runStepEngine, 100)
+        return
+      }
+
+      if (result.action === "generate_pdf") {
+        handleGeneratePdf()
+        return
+      }
+
+      if (result.action === "add_receipt") {
+        fileInputRef.current?.click()
+        return
+      }
+
+      if (result.action === "cancel") {
+        cancelCurrentFlow()
+        return
+      }
+
+      // off_topic → fall back to the general chat assistant
+      await streamFreeTextReply(message)
+    },
+    [
+      addMessage,
+      pushProgressCard,
+      runStepEngine,
+      streamFreeTextReply,
+      cancelCurrentFlow,
+      handleGeneratePdf,
+    ]
+  )
+
   // --- Send ---
 
   const addChip = useCallback((name: string) => {
@@ -570,6 +750,23 @@ export function ExpenseChatShell() {
     }
 
     if (pendingAction && value) {
+      // Escape hatch: cancel the in-flight prompt even though pendingAction
+      // would otherwise swallow the input.
+      if (/^(avbryt|ångra|fel kvitto|glöm det|börja om)\.?$/i.test(value)) {
+        setPrompt("")
+        addMessage({ id: uid(), role: "user", type: "text", body: value })
+        cancelCurrentFlow()
+        return
+      }
+      // If the message looks like a command (or fails the field's format
+      // check), route it through the intent handler instead of letting
+      // pendingAction blindly accept it as the field value.
+      const expected = expectedFieldRef.current
+      if (expected && shouldRouteToIntent(value, expected)) {
+        setPrompt("")
+        void handleIntent(value, { expectingField: expected })
+        return
+      }
       pendingAction(value)
       setPrompt("")
       return
@@ -577,7 +774,10 @@ export function ExpenseChatShell() {
 
     if (attachedFile) {
       const file = attachedFile
-      receiptImagesRef.current = [...receiptImagesRef.current, new File([file], file.name, { type: file.type })]
+      receiptImagesRef.current = [
+        ...receiptImagesRef.current,
+        new File([file], file.name, { type: file.type }),
+      ]
       setPrompt("")
       clearAttachment()
       void startScanFlow(file)
@@ -585,8 +785,15 @@ export function ExpenseChatShell() {
     }
 
     if (value) {
-      addMessage({ id: uid(), role: "user", type: "text", body: value })
       setPrompt("")
+      const hasReceiptInProgress =
+        Object.values(extractedRef.current).some((v) => v != null)
+      const hasSavedReceipts = collectedReceiptsRef.current.length > 0
+      if (hasReceiptInProgress || hasSavedReceipts) {
+        void handleIntent(value)
+        return
+      }
+      addMessage({ id: uid(), role: "user", type: "text", body: value })
       void streamFreeTextReply(value)
     }
   }, [
@@ -599,98 +806,27 @@ export function ExpenseChatShell() {
     clearAttachment,
     addMessage,
     streamFreeTextReply,
+    handleIntent,
+    cancelCurrentFlow,
     activeChipSuggestion,
     addChip,
     safeActiveChipIndex,
     selectableIndices,
   ])
 
-  // --- PDF generation ---
+  // --- Edit / Submit ---
 
   const handleEditField = useCallback(
     (label: string) => {
       setMessages((prev) => prev.filter((m) => m.type !== "summary"))
-      if (label === "Kategori") {
-        setTimeout(() => {
-          addMessage({ id: uid(), role: "assistant", type: "text", body: "Vilken kategori ska utlägget ha?" })
-          showSuggestions(CATEGORIES, handleCategoryInput)
-        }, 100)
-      } else if (label === "Deltagare") {
-        setTimeout(() => {
-          addMessage({ id: uid(), role: "assistant", type: "text", body: "Vilka interna deltagare var med? Välj ur listan." })
-          setChipMode(true)
-          setSelectedChips([])
-          showSuggestions(EMPLOYEES, () => {})
-          setPendingAction(() => (value: string) => handleParticipantInput(value, "Representation, intern"))
-        }, 100)
+      const keyByLabel = SCAN_FIELD_KEYS.find((e) => e.label === label)?.key
+      if (keyByLabel) {
+        extractedRef.current = { ...extractedRef.current, [keyByLabel]: undefined }
       }
+      setTimeout(runStepEngine, 100)
     },
-    [addMessage, showSuggestions, handleCategoryInput, handleParticipantInput]
+    [runStepEngine]
   )
-
-  const handleGeneratePdf = useCallback(() => {
-    const receipts = collectedReceiptsRef.current
-    if (receipts.length === 0) return
-
-    const gid = uid()
-    const initialSteps = GENERATION_STEPS.map((s) => ({ ...s }))
-    setGeneratingSteps(initialSteps)
-
-    setTimeout(() => {
-      addMessage({ id: gid, role: "assistant", type: "generating", steps: initialSteps })
-    }, 100)
-
-    initialSteps.forEach((_, i) => {
-      setTimeout(() => {
-        setGeneratingSteps((prev) =>
-          prev.map((s, idx) => (idx === i ? { ...s, status: "done" } : s))
-        )
-      }, 800 + i * 900)
-    })
-
-    const totalDelay = 800 + initialSteps.length * 900 + 400
-    setTimeout(async () => {
-      try {
-        const formData = new FormData()
-        formData.append("receipts", JSON.stringify(receipts))
-        for (const img of receiptImagesRef.current) {
-          formData.append("images", img)
-        }
-
-        const res = await fetch("/api/receipt/pdf", {
-          method: "POST",
-          body: formData,
-        })
-
-        if (!res.ok) {
-          throw new Error(`PDF generation failed (${res.status})`)
-        }
-
-        const blob = await res.blob()
-        const count = receipts.length
-        const filename = count === 1 ? "verifikation.pdf" : `verifikation-${count}-kvitton.pdf`
-
-        addMessage({
-          id: uid(),
-          role: "assistant",
-          type: "download",
-          filename,
-          blobUrl: URL.createObjectURL(blob),
-        })
-      } catch (err) {
-        addMessage({
-          id: uid(),
-          role: "assistant",
-          type: "text",
-          body: `Kunde inte generera PDF: ${err instanceof Error ? err.message : "Okänt fel"}`,
-        })
-      }
-
-      collectedReceiptsRef.current = []
-      setCollectedReceipts([])
-      receiptImagesRef.current = []
-    }, totalDelay)
-  }, [addMessage])
 
   const handleLineItemsChange = useCallback((included: LineItem[]) => {
     includedRaderRef.current = included
@@ -714,6 +850,8 @@ export function ExpenseChatShell() {
       const updated = [...collectedReceiptsRef.current, newReceipt]
       collectedReceiptsRef.current = updated
       setCollectedReceipts(updated)
+      extractedRef.current = {}
+      includedRaderRef.current = null
 
       setTimeout(() => {
         addMessage({
@@ -808,7 +946,7 @@ export function ExpenseChatShell() {
                             className="mt-1 h-8 w-8 border border-border/70 bg-secondary text-secondary-foreground"
                           />
                           <div className="flex-1 py-1">
-                            <ScanningCard fields={scanFields} />
+                            <ScanningCard fields={message.fields} />
                           </div>
                         </Message>
                       )
@@ -817,9 +955,23 @@ export function ExpenseChatShell() {
                     if (message.type === "summary") {
                       const cur = extractedRef.current.valuta || "SEK"
                       let rate: number | undefined
-                      if (cur !== "SEK" && extractedRef.current.belopp && extractedRef.current.belopp_sek) {
-                        const origNum = parseFloat(extractedRef.current.belopp.replace(/[^\d,.-]/g, "").replace(",", ".")) || 0
-                        const sekNum = parseFloat(extractedRef.current.belopp_sek.replace(/[^\d,.-]/g, "").replace(",", ".")) || 0
+                      if (
+                        cur !== "SEK" &&
+                        extractedRef.current.belopp &&
+                        extractedRef.current.belopp_sek
+                      ) {
+                        const origNum =
+                          parseFloat(
+                            extractedRef.current.belopp
+                              .replace(/[^\d,.-]/g, "")
+                              .replace(",", ".")
+                          ) || 0
+                        const sekNum =
+                          parseFloat(
+                            extractedRef.current.belopp_sek
+                              .replace(/[^\d,.-]/g, "")
+                              .replace(",", ".")
+                          ) || 0
                         if (origNum > 0) rate = sekNum / origNum
                       }
                       return (
