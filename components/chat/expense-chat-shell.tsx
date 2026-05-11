@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowUp, Camera, FileText, Paperclip, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { FloatingNav } from "@/components/ui/floating-nav"
@@ -452,10 +452,59 @@ export function ExpenseChatShell() {
     setSelectedChips((prev) => prev.filter((c) => c !== name))
   }, [])
 
+  const filteredSuggestions = useMemo(() => {
+    const q = prompt.toLowerCase()
+    return suggestions.filter(
+      (s) => !selectedChips.includes(s) && s.toLowerCase().includes(q)
+    )
+  }, [suggestions, selectedChips, prompt])
+
+  const [activeChipIndex, setActiveChipIndex] = useState(0)
+
+  useEffect(() => {
+    setActiveChipIndex(0)
+  }, [suggestions])
+
+  const handlePromptChange = useCallback((value: string) => {
+    setPrompt(value)
+    setActiveChipIndex(0)
+  }, [])
+
+  const safeActiveChipIndex =
+    filteredSuggestions.length === 0
+      ? 0
+      : Math.min(activeChipIndex, filteredSuggestions.length - 1)
+
+  const activeChipSuggestion =
+    chipMode && filteredSuggestions.length > 0
+      ? filteredSuggestions[safeActiveChipIndex]
+      : null
+
+  const handleChipKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (!chipMode || filteredSuggestions.length === 0) return
+      if (e.key === "ArrowDown" || (e.key === "Tab" && !e.shiftKey)) {
+        e.preventDefault()
+        setActiveChipIndex((i) => (i + 1) % filteredSuggestions.length)
+      } else if (e.key === "ArrowUp" || (e.key === "Tab" && e.shiftKey)) {
+        e.preventDefault()
+        setActiveChipIndex(
+          (i) => (i - 1 + filteredSuggestions.length) % filteredSuggestions.length
+        )
+      }
+    },
+    [chipMode, filteredSuggestions.length]
+  )
+
   const handlePromptSubmit = useCallback(() => {
     const value = prompt.trim()
 
     if (chipMode) {
+      const userIntent = value.length > 0 || safeActiveChipIndex > 0
+      if (userIntent && activeChipSuggestion) {
+        addChip(activeChipSuggestion)
+        return
+      }
       if (selectedChips.length === 0) return
       const joined = selectedChips.join(", ")
       pendingAction?.(joined)
@@ -492,6 +541,9 @@ export function ExpenseChatShell() {
     clearAttachment,
     addMessage,
     streamFreeTextReply,
+    activeChipSuggestion,
+    addChip,
+    safeActiveChipIndex,
   ])
 
   // --- PDF generation ---
@@ -786,17 +838,18 @@ export function ExpenseChatShell() {
                     className="pointer-events-none absolute -left-[100vw] -right-[100vw] -top-24 -bottom-2 bg-gradient-to-t from-background via-background/90 to-transparent"
                   />
                   <div className="relative flex flex-wrap gap-2 px-1 py-1">
-                    {suggestions
-                      .filter(
-                        (s) =>
-                          !selectedChips.includes(s) &&
-                          s.toLowerCase().includes(prompt.toLowerCase())
-                      )
-                      .map((s) => (
+                    {filteredSuggestions.map((s, idx) => {
+                      const isActive = chipMode && idx === safeActiveChipIndex
+                      return (
                         <PromptSuggestion
                           key={s}
                           size="sm"
                           highlight={chipMode ? undefined : prompt}
+                          className={
+                            isActive
+                              ? "border-primary bg-primary/10 text-foreground ring-2 ring-primary/40"
+                              : undefined
+                          }
                           onClick={() => {
                             if (chipMode) {
                               addChip(s)
@@ -809,14 +862,15 @@ export function ExpenseChatShell() {
                         >
                           {s}
                         </PromptSuggestion>
-                      ))}
+                      )
+                    })}
                   </div>
                 </div>
               )}
 
               <PromptInput
                 value={prompt}
-                onValueChange={setPrompt}
+                onValueChange={handlePromptChange}
                 onSubmit={handlePromptSubmit}
                 className="rounded-md border-border/80 bg-background/70 px-4 py-3 shadow-none backdrop-blur-xl"
               >
@@ -867,6 +921,7 @@ export function ExpenseChatShell() {
                 )}
 
                 <PromptInputTextarea
+                  onKeyDown={handleChipKeyDown}
                   placeholder={
                     chipMode
                       ? "Filtrera anställda…"
