@@ -31,16 +31,16 @@ export async function POST(request: Request) {
   }
 
   try {
-    const action = await interpretIntent({
+    const actions = await interpretIntent({
       extracted: extracted as ExtractedReceipt,
       savedCount: typeof savedCount === "number" ? savedCount : 0,
       expectingField:
         typeof expectingField === "string" ? expectingField : undefined,
       message,
     })
-    return Response.json(action)
+    return Response.json({ actions })
   } catch (err) {
     console.error("edit-receipt failed", err)
-    return Response.json({ action: "off_topic" })
+    return Response.json({ actions: [{ action: "off_topic" }] })
   }
 }
