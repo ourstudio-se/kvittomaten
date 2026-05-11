@@ -1,9 +1,9 @@
 "use client"
 
 import * as React from "react"
+import { ArrowUp, SquarePen } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Textarea } from "../ui/textarea"
 import { cn } from "@/lib/utils"
 
@@ -32,6 +32,14 @@ export function ChatPanel({ className }: { className?: string }) {
   const viewportRef = React.useRef<HTMLDivElement | null>(null)
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null)
   const abortRef = React.useRef<AbortController | null>(null)
+  const starterPrompts = React.useMemo(
+    () => [
+      "Sammanfatta dagens kvitton",
+      "Vilka kostnader sticker ut?",
+      "Skriv ett utkast till uppföljning",
+    ],
+    []
+  )
 
   const lastMessageContent = messages.at(-1)?.content ?? ""
   React.useEffect(() => {
@@ -39,6 +47,18 @@ export function ChatPanel({ className }: { className?: string }) {
     if (!el) return
     el.scrollTop = el.scrollHeight
   }, [messages.length, lastMessageContent])
+
+  React.useEffect(() => {
+    return () => abortRef.current?.abort()
+  }, [])
+
+  function resetChat() {
+    abortRef.current?.abort()
+    setMessages([])
+    setDraft("")
+    setIsLoading(false)
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }
 
   async function submit() {
     const trimmed = draft.trim()
@@ -111,93 +131,175 @@ export function ChatPanel({ className }: { className?: string }) {
   }
 
   return (
-    <Card className={cn("flex h-[min(75svh,720px)] flex-col", className)}>
-      <CardHeader className="border-b">
-        <CardTitle>Chat</CardTitle>
-      </CardHeader>
-
-      <CardContent className="min-h-0 flex-1 pt-0">
-        <div
-          ref={viewportRef}
-          className="h-full overflow-y-auto px-4 pb-4 pt-4 [scrollbar-gutter:stable] group-data-[size=sm]/card:px-3"
+    <main className={cn("grain min-h-screen overflow-hidden bg-background", className)}>
+      <div className="fixed left-4 top-4 z-50 flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="icon"
+          aria-label="Ny chatt"
+          className="rounded-full border-border/80 bg-background/75 backdrop-blur-xl"
+          onClick={resetChat}
         >
-          {messages.length === 0 ? (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              Type a message to start.
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              {messages.map((m) => (
-                <div
-                  key={m.id}
-                  className={cn(
-                    "flex",
-                    m.role === "user" ? "justify-end" : "justify-start"
-                  )}
-                >
+          <SquarePen className="size-4" />
+        </Button>
+        <div className="rounded-full border border-border/80 bg-background/70 px-3 py-1 text-xs text-muted-foreground backdrop-blur-xl">
+          Expense Chat
+        </div>
+      </div>
+
+      <div className="relative flex h-screen flex-col overflow-hidden">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-primary/12 to-transparent" />
+
+        <section className="relative flex min-h-0 flex-1 flex-col">
+          <div
+            ref={viewportRef}
+            className="mx-auto flex min-h-0 w-full max-w-[800px] flex-1 flex-col overflow-y-auto px-6 pt-24 pb-40 [scrollbar-gutter:stable] lg:px-8"
+          >
+            {messages.length === 0 ? (
+              <div className="flex min-h-full flex-col justify-center gap-8 pb-24">
+                <div className="space-y-4">
+                  <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">
+                    Expense AI Interface
+                  </p>
+                  <h1 className="max-w-2xl text-[clamp(2.5rem,8vw,5.5rem)] leading-[0.92] tracking-[-0.06em] text-foreground">
+                    Din chatvy, nu i den här appen.
+                  </h1>
+                  <p className="max-w-xl text-base leading-7 text-muted-foreground">
+                    Jag har behållit den befintliga streamade chatlogiken men flyttat över
+                    uttrycket, rytmen och ytan från ditt `expense-chat-ui`.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {starterPrompts.map((prompt) => (
+                    <button
+                      key={prompt}
+                      type="button"
+                      className="rounded-full border border-border/80 bg-card/80 px-4 py-2 text-sm text-foreground transition hover:border-primary/40 hover:bg-accent"
+                      onClick={() => {
+                        setDraft(prompt)
+                        requestAnimationFrame(() => textareaRef.current?.focus())
+                      }}
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {messages.map((m) => (
                   <div
-                    className={cn(
-                      "max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed",
-                      m.role === "user"
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-foreground"
-                    )}
+                    key={m.id}
+                    className={cn("flex gap-3", m.role === "user" ? "justify-end" : "justify-start")}
                   >
-                    <div className="whitespace-pre-wrap break-words">{m.content}</div>
-                    <div className="mt-1 text-[0.7rem] leading-none text-muted-foreground">
-                      {formatTime(m.createdAt)}
+                    {m.role === "assistant" ? (
+                      <img
+                        src="/assistant-avatar.svg"
+                        alt="AI"
+                        className="mt-1 h-8 w-8 shrink-0 rounded-full border border-border/70 bg-secondary"
+                      />
+                    ) : null}
+
+                    <div className={cn("flex max-w-[85%] flex-col", m.role === "user" ? "items-end" : "")}>
+                      <div
+                        className={cn(
+                          "rounded-[1.4rem] border px-4 py-3 text-sm leading-7 shadow-[0_1px_0_rgba(0,0,0,0.03)] backdrop-blur-sm",
+                          m.role === "user"
+                            ? "border-primary/30 bg-primary text-primary-foreground"
+                            : "border-border/80 bg-card text-card-foreground"
+                        )}
+                      >
+                        <div className="whitespace-pre-wrap break-words">{m.content || (isLoading ? "…" : "")}</div>
+                      </div>
+                      <div className="px-1 pt-1 text-[0.68rem] uppercase tracking-[0.18em] text-muted-foreground">
+                        {formatTime(m.createdAt)}
+                      </div>
                     </div>
                   </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="pointer-events-none fixed inset-x-0 bottom-0 h-40 bg-gradient-to-t from-background via-background/92 to-transparent" />
+
+          <footer className="fixed inset-x-0 bottom-0 px-6 pb-6 lg:px-8">
+            <div className="mx-auto max-w-[800px]">
+              {messages.length === 0 ? (
+                <div className="mb-2 flex flex-wrap gap-2">
+                  {starterPrompts.map((prompt) => (
+                    <button
+                      key={`footer-${prompt}`}
+                      type="button"
+                      className="rounded-full border border-border/80 bg-background/65 px-3 py-1.5 text-sm text-muted-foreground backdrop-blur-xl transition hover:text-foreground"
+                      onClick={() => {
+                        setDraft(prompt)
+                        requestAnimationFrame(() => textareaRef.current?.focus())
+                      }}
+                    >
+                      {prompt}
+                    </button>
+                  ))}
                 </div>
-              ))}
+              ) : null}
+
+              <form
+                className="rounded-[1.7rem] border border-border/80 bg-background/72 p-4 shadow-none backdrop-blur-xl"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  submit()
+                }}
+              >
+                <Textarea
+                  ref={textareaRef}
+                  value={draft}
+                  rows={2}
+                  placeholder="Beskriv vad som ska granskas eller skriv ditt nästa meddelande..."
+                  className="min-h-[96px] resize-none border-0 bg-transparent px-0 py-0 text-base leading-7 shadow-none focus-visible:ring-0"
+                  onChange={(e) => setDraft(e.target.value)}
+                  onCompositionStart={() => setIsComposing(true)}
+                  onCompositionEnd={() => setIsComposing(false)}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return
+                    if (e.shiftKey) return
+                    if (isComposing) return
+                    if (isLoading) return
+                    e.preventDefault()
+                    submit()
+                  }}
+                />
+
+                <div className="mt-3 flex items-center justify-between gap-4">
+                  <div className="text-xs text-muted-foreground">
+                    {isLoading ? "Svar streamas..." : "Enter skickar, Shift+Enter ny rad"}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {isLoading ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="rounded-full border-border/80 bg-background/80"
+                        onClick={() => abortRef.current?.abort()}
+                      >
+                        Stoppa
+                      </Button>
+                    ) : null}
+                    <Button
+                      type="submit"
+                      className="size-10 rounded-full p-0"
+                      aria-label="Skicka"
+                      disabled={!draft.trim() || isLoading}
+                    >
+                      <ArrowUp className="size-5" />
+                    </Button>
+                  </div>
+                </div>
+              </form>
             </div>
-          )}
-        </div>
-      </CardContent>
-
-      <CardFooter>
-        <form
-          className="flex w-full items-end gap-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            submit()
-          }}
-        >
-          <Textarea
-            ref={textareaRef}
-            value={draft}
-            rows={2}
-            placeholder="Write a message…"
-            className="min-h-[2.25rem] resize-none"
-            onChange={(e) => setDraft(e.target.value)}
-            onCompositionStart={() => setIsComposing(true)}
-            onCompositionEnd={() => setIsComposing(false)}
-            onKeyDown={(e) => {
-              if (e.key !== "Enter") return
-              if (e.shiftKey) return
-              if (isComposing) return
-              if (isLoading) return
-              e.preventDefault()
-              submit()
-            }}
-          />
-
-          {isLoading ? (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => abortRef.current?.abort()}
-            >
-              Stop
-            </Button>
-          ) : null}
-
-          <Button type="submit" disabled={!draft.trim() || isLoading}>
-            Send
-          </Button>
-        </form>
-      </CardFooter>
-    </Card>
+          </footer>
+        </section>
+      </div>
+    </main>
   )
 }
-
