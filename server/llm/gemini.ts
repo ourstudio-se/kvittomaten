@@ -15,6 +15,8 @@ const RECEIPT_CATEGORIES = [
   "Övrigt",
 ] as const
 
+export type LineItem = { beskrivning: string; belopp: string }
+
 export type ExtractedReceipt = {
   leverantor?: string
   datum?: string
@@ -24,6 +26,7 @@ export type ExtractedReceipt = {
   kategori?: string
   syfte?: string
   deltagare?: string
+  rader?: LineItem[]
 }
 
 function getApiKey() {
@@ -82,6 +85,25 @@ const RECEIPT_SCHEMA: Schema = {
       description:
         "Eventuella deltagare som anges på kvittot. Sällan på kvitton – lämna tom sträng om okänt.",
     },
+    rader: {
+      type: Type.ARRAY,
+      description:
+        "Alla synliga artikelrader/poster på kvittot. Varje rad har en beskrivning och ett belopp. Lämna tom array om inga enskilda rader kan urskiljas.",
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          beskrivning: {
+            type: Type.STRING,
+            description: "Artikelns namn eller beskrivning som det står på kvittot.",
+          },
+          belopp: {
+            type: Type.STRING,
+            description: "Radens belopp inklusive moms, t.ex. '45 SEK' eller '12.50 EUR'.",
+          },
+        },
+        required: ["beskrivning", "belopp"],
+      },
+    },
   },
   required: [
     "leverantor",
@@ -92,6 +114,7 @@ const RECEIPT_SCHEMA: Schema = {
     "kategori",
     "syfte",
     "deltagare",
+    "rader",
   ],
   propertyOrdering: [
     "leverantor",
@@ -102,6 +125,7 @@ const RECEIPT_SCHEMA: Schema = {
     "kategori",
     "syfte",
     "deltagare",
+    "rader",
   ],
 }
 
@@ -112,7 +136,8 @@ Regler:
 - Belopp ska vara totalsumman i originalvaluta som den står på kvittot.
 - Identifiera valutan från symboler (kr/SEK, €/EUR, $/USD, £/GBP, Fr./CHF, NOK, DKK), landskontext eller språk på kvittot.
 - Om valutan inte är SEK, använd Google Search för att slå upp aktuell växelkurs och konvertera beloppet till SEK. Ange det konverterade beloppet i belopp_sek.
-- Om valutan redan är SEK, sätt belopp_sek till samma värde som belopp.`
+- Om valutan redan är SEK, sätt belopp_sek till samma värde som belopp.
+- Extrahera alla synliga artikelrader med beskrivning och belopp. Varje post/vara på kvittot ska bli en rad. Om inga enskilda rader syns, returnera en tom array.`
 
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === "string" && v.trim().length > 0
@@ -142,6 +167,24 @@ function validateExtracted(raw: unknown): ExtractedReceipt {
   }
   if (isNonEmptyString(r.syfte)) out.syfte = r.syfte.trim().slice(0, 200)
   if (isNonEmptyString(r.deltagare)) out.deltagare = r.deltagare.trim()
+
+  if (Array.isArray(r.rader)) {
+    const validRader: LineItem[] = []
+    for (const item of r.rader) {
+      if (
+        item &&
+        typeof item === "object" &&
+        isNonEmptyString((item as Record<string, unknown>).beskrivning) &&
+        isNonEmptyString((item as Record<string, unknown>).belopp)
+      ) {
+        validRader.push({
+          beskrivning: ((item as Record<string, unknown>).beskrivning as string).trim(),
+          belopp: ((item as Record<string, unknown>).belopp as string).trim(),
+        })
+      }
+    }
+    if (validRader.length > 0) out.rader = validRader
+  }
 
   return out
 }

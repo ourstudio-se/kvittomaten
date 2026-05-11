@@ -39,6 +39,8 @@ import {
   type ScanField,
 } from "@/lib/mock-expense-chat"
 
+type LineItem = { beskrivning: string; belopp: string }
+
 type ExtractedReceipt = {
   leverantor?: string
   datum?: string
@@ -48,6 +50,7 @@ type ExtractedReceipt = {
   kategori?: string
   syfte?: string
   deltagare?: string
+  rader?: LineItem[]
 }
 
 const SCAN_FIELD_KEYS: { label: string; key: keyof ExtractedReceipt }[] = [
@@ -95,6 +98,7 @@ export function ExpenseChatShell() {
   const receiptImagesRef = useRef<File[]>([])
 
   const extractedRef = useRef<ExtractedReceipt>({})
+  const includedRaderRef = useRef<LineItem[] | null>(null)
 
   const [hasCamera, setHasCamera] = useState(false)
   const cameraInputRef = useRef<HTMLInputElement>(null)
@@ -140,6 +144,7 @@ export function ExpenseChatShell() {
     collectedReceiptsRef.current = []
     setCollectedReceipts([])
     extractedRef.current = {}
+    includedRaderRef.current = null
     receiptImagesRef.current = []
     setIsProcessing(false)
   }, [clearAttachment])
@@ -256,7 +261,7 @@ export function ExpenseChatShell() {
     [addMessage, clearSuggestions, showSummary, showSuggestions, askForParticipants]
   )
 
-  const continueAfterScan = useCallback(
+  const continueToCategory = useCallback(
     (extracted: ExtractedReceipt) => {
       const category = extracted.kategori
       const deltagare = extracted.deltagare
@@ -276,16 +281,23 @@ export function ExpenseChatShell() {
         category === "Representation, intern" ||
         category === "Representation, extern"
 
-      // Always ask for representation receipts (extracted deltagare on receipts
-      // is unreliable). For other categories, only ask when deltagare is missing.
-      if (isRepr || !deltagare) {
+      // Only ask for participants on representation receipts.
+      if (isRepr) {
         askForParticipants(category)
         return
       }
 
-      showSummary(category, deltagare)
+      showSummary(category, deltagare || "–")
     },
     [addMessage, showSuggestions, handleCategoryInput, askForParticipants, showSummary]
+  )
+
+  const continueAfterScan = useCallback(
+    (extracted: ExtractedReceipt) => {
+      includedRaderRef.current = extracted.rader ?? null
+      continueToCategory(extracted)
+    },
+    [continueToCategory]
   )
 
   // --- Scan flow ---
@@ -294,7 +306,8 @@ export function ExpenseChatShell() {
     (extracted: ExtractedReceipt, onDone: () => void) => {
       SCAN_FIELD_KEYS.forEach((entry, i) => {
         setTimeout(() => {
-          const value = extracted[entry.key]
+          const raw = extracted[entry.key]
+          const value = typeof raw === "string" ? raw : undefined
           setScanFields((prev) =>
             prev.map((f) =>
               f.label === entry.label
@@ -679,12 +692,25 @@ export function ExpenseChatShell() {
     }, totalDelay)
   }, [addMessage])
 
+  const handleLineItemsChange = useCallback((included: LineItem[]) => {
+    includedRaderRef.current = included
+  }, [])
+
   const handleSubmit = useCallback(
     (summaryFields: { label: string; value: string }[]) => {
       setIsProcessing(false)
       setMessages((prev) => prev.filter((m) => m.type !== "summary"))
 
-      const newReceipt: CollectedReceipt = { id: uid(), fields: summaryFields }
+      // Append included rader to the collected fields
+      const finalFields = [...summaryFields]
+      if (includedRaderRef.current && includedRaderRef.current.length > 0) {
+        const raderText = includedRaderRef.current
+          .map((r) => `${r.beskrivning}: ${r.belopp}`)
+          .join("\n")
+        finalFields.push({ label: "Inkluderade rader", value: raderText })
+      }
+
+      const newReceipt: CollectedReceipt = { id: uid(), fields: finalFields }
       const updated = [...collectedReceiptsRef.current, newReceipt]
       collectedReceiptsRef.current = updated
       setCollectedReceipts(updated)
@@ -789,6 +815,13 @@ export function ExpenseChatShell() {
                     }
 
                     if (message.type === "summary") {
+                      const cur = extractedRef.current.valuta || "SEK"
+                      let rate: number | undefined
+                      if (cur !== "SEK" && extractedRef.current.belopp && extractedRef.current.belopp_sek) {
+                        const origNum = parseFloat(extractedRef.current.belopp.replace(/[^\d,.-]/g, "").replace(",", ".")) || 0
+                        const sekNum = parseFloat(extractedRef.current.belopp_sek.replace(/[^\d,.-]/g, "").replace(",", ".")) || 0
+                        if (origNum > 0) rate = sekNum / origNum
+                      }
                       return (
                         <Message key={message.id}>
                           <MessageAvatar
@@ -804,8 +837,12 @@ export function ExpenseChatShell() {
                             <SummaryCard
                               fields={message.fields}
                               flowFields={["Kategori", "Deltagare"]}
+                              lineItems={extractedRef.current.rader}
+                              currency={cur}
+                              exchangeRate={rate}
                               onSubmit={handleSubmit}
                               onEditField={handleEditField}
+                              onLineItemsChange={handleLineItemsChange}
                             />
                           </div>
                         </Message>
