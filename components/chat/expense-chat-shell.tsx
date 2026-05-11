@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowUp, Camera, FileText, Paperclip, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { FloatingNav } from "@/components/ui/floating-nav"
@@ -88,6 +88,7 @@ export function ExpenseChatShell() {
 
   const [collectedReceipts, setCollectedReceipts] = useState<CollectedReceipt[]>([])
   const collectedReceiptsRef = useRef<CollectedReceipt[]>([])
+  const receiptImageRef = useRef<File | null>(null)
 
   const extractedRef = useRef<ExtractedReceipt>({})
 
@@ -134,6 +135,7 @@ export function ExpenseChatShell() {
     collectedReceiptsRef.current = []
     setCollectedReceipts([])
     extractedRef.current = {}
+    receiptImageRef.current = null
   }, [clearAttachment])
 
   const showSuggestions = useCallback((opts: string[], action: (value: string) => void) => {
@@ -471,10 +473,59 @@ export function ExpenseChatShell() {
     setSelectedChips((prev) => prev.filter((c) => c !== name))
   }, [])
 
+  const filteredSuggestions = useMemo(() => {
+    const q = prompt.toLowerCase()
+    return suggestions.filter(
+      (s) => !selectedChips.includes(s) && s.toLowerCase().includes(q)
+    )
+  }, [suggestions, selectedChips, prompt])
+
+  const [activeChipIndex, setActiveChipIndex] = useState(0)
+
+  useEffect(() => {
+    setActiveChipIndex(0)
+  }, [suggestions])
+
+  const handlePromptChange = useCallback((value: string) => {
+    setPrompt(value)
+    setActiveChipIndex(0)
+  }, [])
+
+  const safeActiveChipIndex =
+    filteredSuggestions.length === 0
+      ? 0
+      : Math.min(activeChipIndex, filteredSuggestions.length - 1)
+
+  const activeChipSuggestion =
+    chipMode && filteredSuggestions.length > 0
+      ? filteredSuggestions[safeActiveChipIndex]
+      : null
+
+  const handleChipKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (!chipMode || filteredSuggestions.length === 0) return
+      if (e.key === "ArrowDown" || (e.key === "Tab" && !e.shiftKey)) {
+        e.preventDefault()
+        setActiveChipIndex((i) => (i + 1) % filteredSuggestions.length)
+      } else if (e.key === "ArrowUp" || (e.key === "Tab" && e.shiftKey)) {
+        e.preventDefault()
+        setActiveChipIndex(
+          (i) => (i - 1 + filteredSuggestions.length) % filteredSuggestions.length
+        )
+      }
+    },
+    [chipMode, filteredSuggestions.length]
+  )
+
   const handlePromptSubmit = useCallback(() => {
     const value = prompt.trim()
 
     if (chipMode) {
+      const userIntent = value.length > 0 || safeActiveChipIndex > 0
+      if (userIntent && activeChipSuggestion) {
+        addChip(activeChipSuggestion)
+        return
+      }
       if (selectedChips.length === 0) return
       const joined = selectedChips.join(", ")
       pendingAction?.(joined)
@@ -489,6 +540,7 @@ export function ExpenseChatShell() {
 
     if (attachedFile) {
       const file = attachedFile
+      receiptImageRef.current = new File([file], file.name, { type: file.type })
       setPrompt("")
       clearAttachment()
       void startScanFlow(file)
@@ -510,6 +562,9 @@ export function ExpenseChatShell() {
     clearAttachment,
     addMessage,
     streamFreeTextReply,
+    activeChipSuggestion,
+    addChip,
+    safeActiveChipIndex,
   ])
 
   // --- PDF generation ---
@@ -547,27 +602,46 @@ export function ExpenseChatShell() {
     })
 
     const totalDelay = 800 + initialSteps.length * 900 + 400
-    setTimeout(() => {
-      const count = receipts.length
-      const lines = receipts
-        .map((r, i) => {
-          const header = r.fields.find((f) => f.label === "Leverantör")?.value ?? `Kvitto ${i + 1}`
-          return `${i + 1}. ${header}\n${r.fields.map((f) => `   ${f.label}: ${f.value}`).join("\n")}`
+    setTimeout(async () => {
+      try {
+        const formData = new FormData()
+        formData.append("receipts", JSON.stringify(receipts))
+        if (receiptImageRef.current) {
+          formData.append("image", receiptImageRef.current)
+        }
+
+        const res = await fetch("/api/receipt/pdf", {
+          method: "POST",
+          body: formData,
         })
-        .join("\n\n")
-      const blob = new Blob([`Sammanställd utläggsrapport (${count} kvitton)\n\n${lines}\n`], {
-        type: "application/pdf",
-      })
-      const filename = count === 1 ? "utlagg.pdf" : `utlagg-sammanstallning-${count}-kvitton.pdf`
-      addMessage({
-        id: uid(),
-        role: "assistant",
-        type: "download",
-        filename,
-        blobUrl: URL.createObjectURL(blob),
-      })
+
+        if (!res.ok) {
+          throw new Error(`PDF generation failed (${res.status})`)
+        }
+
+        const blob = await res.blob()
+        const count = receipts.length
+        const filename = count === 1 ? "verifikation.pdf" : `verifikation-${count}-kvitton.pdf`
+
+        addMessage({
+          id: uid(),
+          role: "assistant",
+          type: "download",
+          filename,
+          blobUrl: URL.createObjectURL(blob),
+        })
+      } catch (err) {
+        addMessage({
+          id: uid(),
+          role: "assistant",
+          type: "text",
+          body: `Kunde inte generera PDF: ${err instanceof Error ? err.message : "Okänt fel"}`,
+        })
+      }
+
       collectedReceiptsRef.current = []
       setCollectedReceipts([])
+      receiptImageRef.current = null
     }, totalDelay)
   }, [addMessage])
 
@@ -756,6 +830,7 @@ export function ExpenseChatShell() {
                     return null
                   })}
 
+                  {suggestions.length > 0 && <div aria-hidden className="h-[65vh]" />}
                   <ChatContainerScrollAnchor />
                 </ChatContainerContent>
                 <div className="pointer-events-none fixed inset-x-0 bottom-44 z-10 flex justify-end px-screen-edge lg:px-8">
@@ -769,37 +844,45 @@ export function ExpenseChatShell() {
           <footer className="fixed inset-x-0 bottom-0 px-screen-edge pb-6 lg:px-8">
             <div className="mx-auto max-w-[800px]">
               {suggestions.length > 0 && (
-                <div className="mb-2 flex flex-wrap gap-2">
-                  {suggestions
-                    .filter(
-                      (s) =>
-                        !selectedChips.includes(s) &&
-                        s.toLowerCase().includes(prompt.toLowerCase())
-                    )
-                    .map((s) => (
-                      <PromptSuggestion
-                        key={s}
-                        size="sm"
-                        highlight={chipMode ? undefined : prompt}
-                        onClick={() => {
-                          if (chipMode) {
-                            addChip(s)
-                          } else {
-                            pendingAction?.(s)
-                            setPrompt("")
-                            clearSuggestions()
+                <div className="relative mb-2">
+                  <div
+                    aria-hidden
+                    className="pointer-events-none absolute -left-[100vw] -right-[100vw] -top-24 -bottom-2 bg-gradient-to-t from-background via-background/90 to-transparent"
+                  />
+                  <div className="relative flex flex-wrap gap-2 px-1 py-1">
+                    {filteredSuggestions.map((s, idx) => {
+                      const isActive = chipMode && idx === safeActiveChipIndex
+                      return (
+                        <PromptSuggestion
+                          key={s}
+                          size="sm"
+                          highlight={chipMode ? undefined : prompt}
+                          className={
+                            isActive
+                              ? "border-primary bg-primary/10 text-foreground ring-2 ring-primary/40"
+                              : undefined
                           }
-                        }}
-                      >
-                        {s}
-                      </PromptSuggestion>
-                    ))}
+                          onClick={() => {
+                            if (chipMode) {
+                              addChip(s)
+                            } else {
+                              pendingAction?.(s)
+                              setPrompt("")
+                              clearSuggestions()
+                            }
+                          }}
+                        >
+                          {s}
+                        </PromptSuggestion>
+                      )
+                    })}
+                  </div>
                 </div>
               )}
 
               <PromptInput
                 value={prompt}
-                onValueChange={setPrompt}
+                onValueChange={handlePromptChange}
                 onSubmit={handlePromptSubmit}
                 className="rounded-md border-border/80 bg-background/70 px-4 py-3 shadow-none backdrop-blur-xl"
               >
@@ -850,6 +933,7 @@ export function ExpenseChatShell() {
                 )}
 
                 <PromptInputTextarea
+                  onKeyDown={handleChipKeyDown}
                   placeholder={
                     chipMode
                       ? "Filtrera anställda…"
