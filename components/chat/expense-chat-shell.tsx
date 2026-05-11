@@ -107,6 +107,9 @@ export function ExpenseChatShell() {
   const [collectedReceipts, setCollectedReceipts] = useState<CollectedReceipt[]>([])
   const collectedReceiptsRef = useRef<CollectedReceipt[]>([])
   const receiptImagesRef = useRef<File[]>([])
+  // Image for the receipt currently being scanned/edited — only committed
+  // to receiptImagesRef when the user accepts the summary.
+  const pendingReceiptImageRef = useRef<File | null>(null)
 
   const extractedRef = useRef<ExtractedReceipt>({})
   const expectedFieldRef = useRef<keyof ExtractedReceipt | null>(null)
@@ -158,12 +161,16 @@ export function ExpenseChatShell() {
     expectedFieldRef.current = null
     includedRaderRef.current = null
     receiptImagesRef.current = []
+    pendingReceiptImageRef.current = null
     setIsProcessing(false)
   }, [clearAttachment])
+
+  const [activeChipIndex, setActiveChipIndex] = useState(-1)
 
   const showSuggestions = useCallback((opts: string[], action: (value: string) => void) => {
     setSuggestions(opts)
     setPendingAction(() => action)
+    setActiveChipIndex(-1)
   }, [])
 
   const clearSuggestions = useCallback(() => {
@@ -171,6 +178,7 @@ export function ExpenseChatShell() {
     setPendingAction(null)
     setChipMode(false)
     setSelectedChips([])
+    setActiveChipIndex(-1)
   }, [])
 
   // --- Summary ---
@@ -202,7 +210,8 @@ export function ExpenseChatShell() {
     if (e.leverantor) fields.push({ label: "Leverantör", value: e.leverantor })
     if (e.datum) fields.push({ label: "Datum", value: e.datum })
 
-    const isForeign = e.valuta && e.valuta !== "SEK"
+    const currency = e.valuta || "SEK"
+    const isForeign = currency !== "SEK"
     if (isForeign && e.belopp) {
       fields.push({ label: "Originalbelopp", value: e.belopp })
       if (e.belopp_sek) fields.push({ label: "Belopp (SEK)", value: e.belopp_sek })
@@ -213,7 +222,24 @@ export function ExpenseChatShell() {
     fields.push({ label: "Kategori", value: category })
     if (e.deltagare) fields.push({ label: "Deltagare", value: e.deltagare })
 
-    addMessage({ id: uid(), role: "assistant", type: "summary", fields })
+    let exchangeRate: number | undefined
+    if (isForeign && e.belopp && e.belopp_sek) {
+      const origNum =
+        parseFloat(e.belopp.replace(/[^\d,.-]/g, "").replace(",", ".")) || 0
+      const sekNum =
+        parseFloat(e.belopp_sek.replace(/[^\d,.-]/g, "").replace(",", ".")) || 0
+      if (origNum > 0) exchangeRate = sekNum / origNum
+    }
+
+    addMessage({
+      id: uid(),
+      role: "assistant",
+      type: "summary",
+      fields,
+      lineItems: e.rader,
+      currency,
+      exchangeRate,
+    })
   }, [addMessage])
 
   // --- Step engine: walk through missing fields one at a time ---
@@ -508,6 +534,7 @@ export function ExpenseChatShell() {
       extractedRef.current = {}
       expectedFieldRef.current = null
       includedRaderRef.current = null
+      pendingReceiptImageRef.current = null
       clearSuggestions()
       clearAttachment()
       setIsProcessing(false)
@@ -577,6 +604,7 @@ export function ExpenseChatShell() {
       collectedReceiptsRef.current = []
       setCollectedReceipts([])
       receiptImagesRef.current = []
+      pendingReceiptImageRef.current = null
     }, totalDelay)
   }, [addMessage])
 
@@ -678,12 +706,6 @@ export function ExpenseChatShell() {
     [chipMode, filteredSuggestions, selectedChips]
   )
 
-  const [activeChipIndex, setActiveChipIndex] = useState(-1)
-
-  useEffect(() => {
-    setActiveChipIndex(-1)
-  }, [suggestions])
-
   const handlePromptChange = useCallback((value: string) => {
     setPrompt(value)
     setActiveChipIndex(value.trim().length > 0 ? 0 : -1)
@@ -774,10 +796,9 @@ export function ExpenseChatShell() {
 
     if (attachedFile) {
       const file = attachedFile
-      receiptImagesRef.current = [
-        ...receiptImagesRef.current,
-        new File([file], file.name, { type: file.type }),
-      ]
+      pendingReceiptImageRef.current = new File([file], file.name, {
+        type: file.type,
+      })
       setPrompt("")
       clearAttachment()
       void startScanFlow(file)
@@ -850,6 +871,17 @@ export function ExpenseChatShell() {
       const updated = [...collectedReceiptsRef.current, newReceipt]
       collectedReceiptsRef.current = updated
       setCollectedReceipts(updated)
+
+      // Commit the pending receipt image alongside the accepted receipt so
+      // both arrays stay in lockstep for PDF generation.
+      if (pendingReceiptImageRef.current) {
+        receiptImagesRef.current = [
+          ...receiptImagesRef.current,
+          pendingReceiptImageRef.current,
+        ]
+        pendingReceiptImageRef.current = null
+      }
+
       extractedRef.current = {}
       includedRaderRef.current = null
 
@@ -953,27 +985,6 @@ export function ExpenseChatShell() {
                     }
 
                     if (message.type === "summary") {
-                      const cur = extractedRef.current.valuta || "SEK"
-                      let rate: number | undefined
-                      if (
-                        cur !== "SEK" &&
-                        extractedRef.current.belopp &&
-                        extractedRef.current.belopp_sek
-                      ) {
-                        const origNum =
-                          parseFloat(
-                            extractedRef.current.belopp
-                              .replace(/[^\d,.-]/g, "")
-                              .replace(",", ".")
-                          ) || 0
-                        const sekNum =
-                          parseFloat(
-                            extractedRef.current.belopp_sek
-                              .replace(/[^\d,.-]/g, "")
-                              .replace(",", ".")
-                          ) || 0
-                        if (origNum > 0) rate = sekNum / origNum
-                      }
                       return (
                         <Message key={message.id}>
                           <MessageAvatar
@@ -989,9 +1000,9 @@ export function ExpenseChatShell() {
                             <SummaryCard
                               fields={message.fields}
                               flowFields={["Kategori", "Deltagare"]}
-                              lineItems={extractedRef.current.rader}
-                              currency={cur}
-                              exchangeRate={rate}
+                              lineItems={message.lineItems}
+                              currency={message.currency ?? "SEK"}
+                              exchangeRate={message.exchangeRate}
                               onSubmit={handleSubmit}
                               onEditField={handleEditField}
                               onLineItemsChange={handleLineItemsChange}
