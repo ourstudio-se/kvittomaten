@@ -501,7 +501,8 @@ export function ExpenseChatShell() {
       ? -1
       : selectableIndices.includes(activeChipIndex)
         ? activeChipIndex
-        : selectableIndices[0]
+        : selectableIndices.find((i) => i > activeChipIndex) ??
+          selectableIndices[selectableIndices.length - 1]
 
   const activeChipSuggestion =
     chipMode && safeActiveChipIndex >= 0
@@ -539,6 +540,14 @@ export function ExpenseChatShell() {
       const userIntent = value.length > 0 || safeActiveChipIndex >= 0
       if (userIntent && activeChipSuggestion) {
         addChip(activeChipSuggestion)
+        const remaining = selectableIndices.filter(
+          (i) => i !== safeActiveChipIndex
+        )
+        const next =
+          remaining.find((i) => i > safeActiveChipIndex) ??
+          remaining[0] ??
+          -1
+        setActiveChipIndex(next)
         return
       }
       if (selectedChips.length === 0) return
@@ -580,6 +589,7 @@ export function ExpenseChatShell() {
     activeChipSuggestion,
     addChip,
     safeActiveChipIndex,
+    selectableIndices,
   ])
 
   // --- PDF generation ---
