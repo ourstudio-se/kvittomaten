@@ -84,6 +84,20 @@ function shouldRouteToIntent(
   return false
 }
 
+const INTRO_MESSAGE_BODY =
+  "Hej! Lägg till eller fotografera ditt kvitto här i chatten så hjälper jag dig att generera en korrekt pdf."
+
+function makeIntroMessages(): ExpenseMessage[] {
+  return [
+    {
+      id: "intro",
+      role: "assistant",
+      type: "text",
+      body: INTRO_MESSAGE_BODY,
+    },
+  ]
+}
+
 const GENERATION_STEPS: GeneratingStep[] = [
   { label: "Sammanställer uppgifter", status: "pending" },
   { label: "Formaterar kvittodokument", status: "pending" },
@@ -92,7 +106,7 @@ const GENERATION_STEPS: GeneratingStep[] = [
 
 export function ExpenseChatShell() {
   const [prompt, setPrompt] = useState("")
-  const [messages, setMessages] = useState<ExpenseMessage[]>([])
+  const [messages, setMessages] = useState<ExpenseMessage[]>(() => makeIntroMessages())
   const [participants, setParticipants] = useState("")
   const [participantMessageId, setParticipantMessageId] = useState<string | null>(null)
   const [attachedFile, setAttachedFile] = useState<File | null>(null)
@@ -114,6 +128,7 @@ export function ExpenseChatShell() {
   const extractedRef = useRef<ExtractedReceipt>({})
   const expectedFieldRef = useRef<keyof ExtractedReceipt | null>(null)
   const includedRaderRef = useRef<LineItem[] | null>(null)
+  const kategoriConfirmedRef = useRef(false)
 
   const [hasCamera, setHasCamera] = useState(false)
   const cameraInputRef = useRef<HTMLInputElement>(null)
@@ -145,7 +160,7 @@ export function ExpenseChatShell() {
   }, [attachedPreviewUrl])
 
   const handleNewChat = useCallback(() => {
-    setMessages([])
+    setMessages(makeIntroMessages())
     setParticipants("")
     setParticipantMessageId(null)
     clearAttachment()
@@ -160,6 +175,7 @@ export function ExpenseChatShell() {
     extractedRef.current = {}
     expectedFieldRef.current = null
     includedRaderRef.current = null
+    kategoriConfirmedRef.current = false
     receiptImagesRef.current = []
     pendingReceiptImageRef.current = null
     setIsProcessing(false)
@@ -266,20 +282,24 @@ export function ExpenseChatShell() {
 
     const promptKategori = () => {
       expectedFieldRef.current = "kategori"
-      addMessage({
-        id: uid(),
-        role: "assistant",
-        type: "text",
-        body: "Vilken kategori passar utlägget? Välj från listan eller skriv eget.",
-      })
-      showSuggestions(CATEGORIES, (raw) => {
-        if (CATEGORIES.includes(raw)) {
-          acceptAnswer("kategori", raw, raw)
-        } else {
-          // Free-text → store as Övrigt with the typed description as suffix
-          const label = `Övrigt – ${raw}`
-          acceptAnswer("kategori", label, label)
+      const suggested = extractedRef.current.kategori
+      const body = suggested
+        ? `Jag antar att det är **${suggested}**. Stämmer det, eller vill du välja en annan kategori?`
+        : "Vilken kategori passar utlägget? Välj från listan eller skriv eget."
+      addMessage({ id: uid(), role: "assistant", type: "text", body })
+      const options =
+        suggested && CATEGORIES.includes(suggested)
+          ? [suggested, ...CATEGORIES.filter((c) => c !== suggested)]
+          : CATEGORIES
+      showSuggestions(options, (raw) => {
+        const chosen = CATEGORIES.includes(raw) ? raw : `Övrigt – ${raw}`
+        kategoriConfirmedRef.current = true
+        // Representation kräver alltid att deltagare anges — rensa eventuellt
+        // AI-extraherat värde så deltagare-prompten alltid kör.
+        if (chosen.startsWith("Representation")) {
+          extractedRef.current = { ...extractedRef.current, deltagare: undefined }
         }
+        acceptAnswer("kategori", chosen, chosen)
       })
     }
 
@@ -310,6 +330,11 @@ export function ExpenseChatShell() {
     function next() {
       const e = extractedRef.current
       for (const entry of SCAN_FIELD_KEYS) {
+        if (entry.key === "kategori") {
+          if (e.kategori && kategoriConfirmedRef.current) continue
+          promptKategori()
+          return
+        }
         if (e[entry.key]) continue
 
         switch (entry.key) {
@@ -321,9 +346,6 @@ export function ExpenseChatShell() {
             return
           case "belopp":
             promptText("belopp", "Vad är totalbeloppet (inkl. valuta)?")
-            return
-          case "kategori":
-            promptKategori()
             return
           case "deltagare":
             promptDeltagare()
@@ -403,6 +425,7 @@ export function ExpenseChatShell() {
 
       extractedRef.current = extracted
       includedRaderRef.current = extracted.rader ?? null
+      kategoriConfirmedRef.current = false
 
       animateScanFields(scanId, extracted, runStepEngine)
     },
@@ -535,6 +558,7 @@ export function ExpenseChatShell() {
       expectedFieldRef.current = null
       includedRaderRef.current = null
       pendingReceiptImageRef.current = null
+      kategoriConfirmedRef.current = false
       clearSuggestions()
       clearAttachment()
       setIsProcessing(false)
@@ -633,6 +657,9 @@ export function ExpenseChatShell() {
         extractedRef.current = {
           ...extractedRef.current,
           [result.field]: result.value,
+        }
+        if (result.field === "kategori") {
+          kategoriConfirmedRef.current = true
         }
         setMessages((prev) => prev.filter((m) => m.type !== "summary"))
         pushProgressCard()
@@ -843,6 +870,9 @@ export function ExpenseChatShell() {
       const keyByLabel = SCAN_FIELD_KEYS.find((e) => e.label === label)?.key
       if (keyByLabel) {
         extractedRef.current = { ...extractedRef.current, [keyByLabel]: undefined }
+        if (keyByLabel === "kategori") {
+          kategoriConfirmedRef.current = false
+        }
       }
       setTimeout(runStepEngine, 100)
     },
@@ -884,6 +914,7 @@ export function ExpenseChatShell() {
 
       extractedRef.current = {}
       includedRaderRef.current = null
+      kategoriConfirmedRef.current = false
 
       setTimeout(() => {
         addMessage({
