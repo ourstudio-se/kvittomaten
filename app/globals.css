@@ -1,13 +1,11 @@
 @import "tailwindcss";
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
 
 @custom-variant dark (&:is(.dark *));
 
 :root {
   --background: oklch(0.94 0.022 138);
   --foreground: oklch(0.13 0.05 138);
-  --card: oklch(0.99 0.004 138 / 0.92);
+  --card: oklch(0.99 0.004 138);
   --card-foreground: oklch(0.15 0.05 138);
   --popover: oklch(0.99 0.004 138);
   --popover-foreground: oklch(0.15 0.05 138);
@@ -18,70 +16,56 @@
   --muted: oklch(0.91 0.018 138);
   --muted-foreground: oklch(0.44 0.08 138);
   --accent: oklch(0.87 0.07 138);
-  --accent-foreground: oklch(0.2 0.08 138);
-  --destructive: oklch(0.52 0.2 30.74);
+  --accent-foreground: oklch(0.20 0.08 138);
+  --destructive: oklch(0.52 0.20 30.74);
   --border: oklch(0.74 0.07 138);
   --input: oklch(0.74 0.07 138);
-  --ring: oklch(0.46 0.2 138);
-  --chart-1: oklch(0.87 0.16 138);
-  --chart-2: oklch(0.75 0.13 145);
-  --chart-3: oklch(0.63 0.11 151);
-  --chart-4: oklch(0.52 0.09 158);
-  --chart-5: oklch(0.41 0.07 165);
-  --radius: 1rem;
-  --font-sans: "Avenir Next", "Helvetica Neue", "Segoe UI", sans-serif;
-  --font-mono: "SFMono-Regular", "Menlo", "Monaco", "Courier New", monospace;
-  --tracking-normal: -0.025em;
-  --radius-input: 0.75rem;
-  --spacing-screen-edge: 1.5rem;
-}
+  --ring: oklch(0.46 0.20 138);
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-mono);
-  --font-heading: var(--font-sans);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-border: var(--border);
-  --color-destructive: var(--destructive);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
-  --color-card: var(--card);
+  --font-sans: var(--font-inter), sans-serif;
+  --font-mono: var(--font-ibm-plex-mono), monospace;
+  --tracking-normal: -0.025em;
+
+  --radius-xs: 0.25rem;
   --radius-sm: 0.625rem;
   --radius-md: 1rem;
   --radius-lg: 1.5rem;
   --radius-xl: 2rem;
   --radius-2xl: 3rem;
-  --radius-3xl: 3.75rem;
-  --radius-4xl: 4.5rem;
-  --tracking-normal: var(--tracking-normal);
-  --spacing-screen-edge: var(--spacing-screen-edge);
+  --radius-input: 0.75rem;
+
+  --size-4: 0.25rem;
+  --size-8: 0.5rem;
+  --size-12: 0.75rem;
+  --size-16: 1rem;
+  --size-24: 1.5rem;
+  --size-32: 2rem;
+  --size-40: 2.5rem;
+  --size-48: 3rem;
+  --size-64: 4rem;
+  --size-80: 5rem;
+  --size-96: 6rem;
+  --size-128: 8rem;
+
+  --spacing-between-cards: var(--size-12);
+  --spacing-between-chips: var(--size-4);
+  --spacing-screen-edge: var(--size-24);
+  --spacing-component-default: var(--size-16);
+  --spacing-between-text: var(--size-8);
+  --spacing-text-to-component: var(--size-16);
+  --spacing-content-to-button: var(--size-24);
+  --spacing-between-sections: var(--size-48);
+  --spacing-hero: var(--size-96);
 }
 
 .dark {
   --background: oklch(0.14 0.02 138);
   --foreground: oklch(0.97 0.02 138);
-  --card: oklch(0.18 0.02 138 / 0.92);
+  --card: oklch(0.18 0.02 138);
   --card-foreground: oklch(0.96 0.02 138);
   --popover: oklch(0.18 0.02 138);
   --popover-foreground: oklch(0.97 0.02 138);
-  --primary: oklch(0.75 0.2 138);
+  --primary: oklch(0.75 0.20 138);
   --primary-foreground: oklch(0.12 0.04 138);
   --secondary: oklch(0.22 0.06 138);
   --secondary-foreground: oklch(0.75 0.18 138);
@@ -92,7 +76,64 @@
   --destructive: oklch(0.51 0.21 27.5);
   --border: oklch(0.28 0.05 138);
   --input: oklch(0.32 0.05 138);
-  --ring: oklch(0.6 0.18 138);
+  --ring: oklch(0.60 0.18 138);
+}
+
+@media (min-width: 768px) {
+  :root {
+    --radius-xs: 0.5rem;
+    --radius-sm: 1rem;
+    --radius-md: 1.25rem;
+    --radius-lg: 1.875rem;
+    --radius-xl: 2.5rem;
+    --radius-2xl: 3.75rem;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --radius-xs: var(--radius-xs);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-2xl: var(--radius-2xl);
+  --radius-input: var(--radius-input);
+  --radius-full: 9999px;
+  --tracking-tighter: calc(var(--tracking-normal) - 0.05em);
+  --tracking-tight: calc(var(--tracking-normal) - 0.025em);
+  --tracking-normal: var(--tracking-normal);
+  --tracking-wide: calc(var(--tracking-normal) + 0.025em);
+  --tracking-wider: calc(var(--tracking-normal) + 0.05em);
+  --tracking-widest: calc(var(--tracking-normal) + 0.1em);
+  --spacing-between-cards: var(--spacing-between-cards);
+  --spacing-between-chips: var(--spacing-between-chips);
+  --spacing-screen-edge: var(--spacing-screen-edge);
+  --spacing-component-default: var(--spacing-component-default);
+  --spacing-between-text: var(--spacing-between-text);
+  --spacing-text-to-component: var(--spacing-text-to-component);
+  --spacing-content-to-button: var(--spacing-content-to-button);
+  --spacing-between-sections: var(--spacing-between-sections);
+  --spacing-hero: var(--spacing-hero);
 }
 
 @layer base {
@@ -110,8 +151,18 @@
     line-height: 1.6;
   }
 
-  html {
-    @apply font-sans;
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-weight: 400;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
   }
 
   button,
