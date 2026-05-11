@@ -19,6 +19,8 @@ export type ExtractedReceipt = {
   leverantor?: string
   datum?: string
   belopp?: string
+  valuta?: string
+  belopp_sek?: string
   kategori?: string
   syfte?: string
   deltagare?: string
@@ -54,7 +56,17 @@ const RECEIPT_SCHEMA: Schema = {
     belopp: {
       type: Type.STRING,
       description:
-        "Totalbelopp inkl. valuta, t.ex. '1 240 SEK'. Lämna tom sträng om totalen inte är läsbar.",
+        "Totalbelopp i originalvaluta som det står på kvittot, t.ex. '45.50 CHF' eller '1 240 SEK'. Lämna tom sträng om totalen inte är läsbar.",
+    },
+    valuta: {
+      type: Type.STRING,
+      description:
+        "Valutakoden (ISO 4217) som kvittot är i, t.ex. 'SEK', 'EUR', 'USD', 'CHF', 'NOK', 'DKK', 'GBP'. Identifiera från valutasymboler (kr, €, $, £, Fr.), landskontext eller explicit text på kvittot. Lämna tom sträng om det inte går att avgöra.",
+    },
+    belopp_sek: {
+      type: Type.STRING,
+      description:
+        "Om valutan INTE är SEK: konvertera totalbeloppet till SEK med ungefärlig aktuell växelkurs och ange resultatet som t.ex. '485 SEK'. Om valutan redan är SEK: samma som belopp-fältet. Lämna tom sträng om du inte kan beräkna.",
     },
     kategori: {
       type: Type.STRING,
@@ -75,6 +87,8 @@ const RECEIPT_SCHEMA: Schema = {
     "leverantor",
     "datum",
     "belopp",
+    "valuta",
+    "belopp_sek",
     "kategori",
     "syfte",
     "deltagare",
@@ -83,13 +97,22 @@ const RECEIPT_SCHEMA: Schema = {
     "leverantor",
     "datum",
     "belopp",
+    "valuta",
+    "belopp_sek",
     "kategori",
     "syfte",
     "deltagare",
   ],
 }
 
-const EXTRACTION_SYSTEM_INSTRUCTION = `Du extraherar strukturerad data från svenska kvitton. Returnera ENDAST fält du kan läsa direkt från bilden. Hitta inte på värden. Om ett fält är otydligt eller saknas, returnera en tom sträng för det fältet. Datum måste vara i YYYY-MM-DD. Belopp ska vara totalsumman inklusive valuta (oftast SEK).`
+const EXTRACTION_SYSTEM_INSTRUCTION = `Du extraherar strukturerad data från kvitton. Returnera ENDAST fält du kan läsa direkt från bilden. Hitta inte på värden. Om ett fält är otydligt eller saknas, returnera en tom sträng för det fältet.
+
+Regler:
+- Datum måste vara i YYYY-MM-DD.
+- Belopp ska vara totalsumman i originalvaluta som den står på kvittot.
+- Identifiera valutan från symboler (kr/SEK, €/EUR, $/USD, £/GBP, Fr./CHF, NOK, DKK), landskontext eller språk på kvittot.
+- Om valutan inte är SEK, använd Google Search för att slå upp aktuell växelkurs och konvertera beloppet till SEK. Ange det konverterade beloppet i belopp_sek.
+- Om valutan redan är SEK, sätt belopp_sek till samma värde som belopp.`
 
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === "string" && v.trim().length > 0
@@ -109,6 +132,8 @@ function validateExtracted(raw: unknown): ExtractedReceipt {
     out.datum = r.datum.trim()
   }
   if (isNonEmptyString(r.belopp)) out.belopp = r.belopp.trim()
+  if (isNonEmptyString(r.valuta)) out.valuta = r.valuta.trim().toUpperCase()
+  if (isNonEmptyString(r.belopp_sek)) out.belopp_sek = r.belopp_sek.trim()
   if (
     isNonEmptyString(r.kategori) &&
     (RECEIPT_CATEGORIES as readonly string[]).includes(r.kategori.trim())
@@ -148,6 +173,7 @@ export async function extractReceiptFields({
       thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
       responseMimeType: "application/json",
       responseSchema: RECEIPT_SCHEMA,
+      tools: [{ googleSearch: {} }],
     },
   })
 

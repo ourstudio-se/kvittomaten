@@ -7,6 +7,8 @@ const A4_WIDTH = 595.28
 const A4_HEIGHT = 841.89
 const CONTENT_WIDTH = A4_WIDTH - PAGE_MARGIN * 2
 
+type ImageAttachment = { buffer: Buffer; mimeType: string }
+
 function today() {
   return new Date().toISOString().slice(0, 10)
 }
@@ -32,19 +34,33 @@ function drawHorizontalLine(doc: PDFKit.PDFDocument, y: number) {
     .stroke()
 }
 
+async function toPdfImage(img: ImageAttachment): Promise<Buffer | null> {
+  if (!img.mimeType.startsWith("image/")) return null
+  const needsConversion =
+    img.mimeType !== "image/jpeg" && img.mimeType !== "image/png"
+  return needsConversion
+    ? await sharp(img.buffer).jpeg({ quality: 90 }).toBuffer()
+    : img.buffer
+}
+
+function getReceiptAmount(receipt: CollectedReceipt): number {
+  // Prefer "Belopp (SEK)" for foreign currency receipts, fall back to "Belopp"
+  const sekField = receipt.fields.find((f) => f.label === "Belopp (SEK)")
+  if (sekField) return parseAmount(sekField.value)
+  const beloppField = receipt.fields.find((f) => f.label === "Belopp")
+  if (beloppField) return parseAmount(beloppField.value)
+  return 0
+}
+
 export async function generateVerifikationPdf(
   receipts: CollectedReceipt[],
-  imageBuffer?: Buffer,
-  imageMimeType?: string,
+  images: ImageAttachment[] = [],
 ): Promise<Buffer> {
-  // Convert non-JPEG/PNG images (HEIC, WebP, TIFF, etc.) before PDF generation
-  let pdfImageBuffer: Buffer | undefined
-  if (imageBuffer && imageMimeType?.startsWith("image/")) {
-    const needsConversion =
-      imageMimeType !== "image/jpeg" && imageMimeType !== "image/png"
-    pdfImageBuffer = needsConversion
-      ? await sharp(imageBuffer).jpeg({ quality: 90 }).toBuffer()
-      : imageBuffer
+  // Convert all images to PDF-compatible format
+  const pdfImages: Buffer[] = []
+  for (const img of images) {
+    const converted = await toPdfImage(img)
+    if (converted) pdfImages.push(converted)
   }
 
   return new Promise((resolve, reject) => {
@@ -136,12 +152,7 @@ export async function generateVerifikationPdf(
       .text("Sammanfattning", PAGE_MARGIN, y)
     y += 22
 
-    const totalAmount = receipts.reduce((sum, r) => {
-      const amountField = r.fields.find(
-        (f) => f.label.toLowerCase() === "belopp",
-      )
-      return sum + (amountField ? parseAmount(amountField.value) : 0)
-    }, 0)
+    const totalAmount = receipts.reduce((sum, r) => sum + getReceiptAmount(r), 0)
 
     doc
       .fontSize(10)
@@ -157,25 +168,29 @@ export async function generateVerifikationPdf(
 
     drawHorizontalLine(doc, y)
 
-    // --- Image attachment page ---
-    if (pdfImageBuffer) {
+    // --- Image attachment pages ---
+    pdfImages.forEach((imgBuf, i) => {
       doc.addPage()
+
+      const label = pdfImages.length === 1
+        ? "Bilaga: Originalkvitto"
+        : `Bilaga ${i + 1}: Originalkvitto`
 
       doc
         .fontSize(13)
         .font("Helvetica-Bold")
-        .text("Bilaga: Originalkvitto", PAGE_MARGIN, PAGE_MARGIN)
+        .text(label, PAGE_MARGIN, PAGE_MARGIN)
 
       const imageY = PAGE_MARGIN + 30
       const maxWidth = CONTENT_WIDTH
       const maxHeight = A4_HEIGHT - imageY - PAGE_MARGIN
 
-      doc.image(pdfImageBuffer, PAGE_MARGIN, imageY, {
+      doc.image(imgBuf, PAGE_MARGIN, imageY, {
         fit: [maxWidth, maxHeight],
         align: "center",
         valign: "center",
       })
-    }
+    })
 
     doc.end()
   })
