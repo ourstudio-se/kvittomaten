@@ -625,6 +625,7 @@ export function ExpenseChatShell() {
                     return null
                   })}
 
+                  {suggestions.length > 0 && <div aria-hidden className="h-[65vh]" />}
                   <ChatContainerScrollAnchor />
                 </ChatContainerContent>
                 <div className="pointer-events-none fixed inset-x-0 bottom-44 z-10 flex justify-end px-screen-edge lg:px-8">
@@ -641,7 +642,7 @@ export function ExpenseChatShell() {
                 <div className="relative mb-2">
                   <div
                     aria-hidden
-                    className="pointer-events-none absolute -inset-x-6 -top-10 bottom-0 rounded-3xl bg-gradient-to-t from-background via-background/85 to-transparent backdrop-blur-sm"
+                    className="pointer-events-none absolute -left-[100vw] -right-[100vw] -top-24 -bottom-2 bg-gradient-to-t from-background via-background/90 to-transparent"
                   />
                   <div className="relative flex flex-wrap gap-2 px-1 py-1">
                     {suggestions
