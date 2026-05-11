@@ -68,6 +68,23 @@ function isImageFile(file: File) {
   return file.type.startsWith("image/")
 }
 
+const SUPPORTED_MIME = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+  "application/pdf",
+])
+
+function isSupportedReceiptFile(file: File): boolean {
+  return SUPPORTED_MIME.has(file.type)
+}
+
+const UNSUPPORTED_FILE_BODY =
+  "Den filtypen stöds inte. Ladda upp en bild (PNG, JPEG, WebP eller HEIC) eller en PDF."
+
 const COMMAND_PREFIX = /^(kan vi|kan du|byt|ändra|ångra|avbryt|fel|glöm|nytt|starta|gör|ny|skapa|generera|exportera|skicka|nollställ|börja|stäng)\b/i
 
 function shouldRouteToIntent(
@@ -397,11 +414,22 @@ export function ExpenseChatShell() {
       addMessage({ id: scanId, role: "assistant", type: "scanning", fields: initialFields })
 
       let extracted: ExtractedReceipt = {}
+      let errorBody: string | null = null
       try {
         const form = new FormData()
         form.append("file", file)
         const res = await fetch("/api/extract-receipt", { method: "POST", body: form })
-        if (!res.ok) throw new Error(`status ${res.status}`)
+        if (!res.ok) {
+          if (res.status === 415) {
+            errorBody = UNSUPPORTED_FILE_BODY
+          } else if (res.status === 413) {
+            errorBody = "Filen är för stor (max 12 MB). Försök med en mindre fil."
+          } else {
+            errorBody =
+              "Jag kunde inte läsa kvittot. Försök ladda upp en tydligare bild."
+          }
+          throw new Error(`status ${res.status}`)
+        }
         const json = (await res.json()) as { fields?: ExtractedReceipt }
         extracted = json.fields ?? {}
       } catch (err) {
@@ -417,8 +445,11 @@ export function ExpenseChatShell() {
           id: uid(),
           role: "assistant",
           type: "text",
-          body: "Jag kunde inte läsa kvittot. Försök ladda upp en tydligare bild.",
+          body:
+            errorBody ??
+            "Jag kunde inte läsa kvittot. Försök ladda upp en tydligare bild.",
         })
+        pendingReceiptImageRef.current = null
         setIsProcessing(false)
         return
       }
@@ -434,10 +465,22 @@ export function ExpenseChatShell() {
 
   // --- File input ---
 
-  const acceptFile = useCallback((file: File) => {
-    setAttachedFile(file)
-    setAttachedPreviewUrl(isImageFile(file) ? URL.createObjectURL(file) : null)
-  }, [])
+  const acceptFile = useCallback(
+    (file: File) => {
+      if (!isSupportedReceiptFile(file)) {
+        addMessage({
+          id: uid(),
+          role: "assistant",
+          type: "text",
+          body: UNSUPPORTED_FILE_BODY,
+        })
+        return
+      }
+      setAttachedFile(file)
+      setAttachedPreviewUrl(isImageFile(file) ? URL.createObjectURL(file) : null)
+    },
+    [addMessage]
+  )
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
