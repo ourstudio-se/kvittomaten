@@ -834,8 +834,10 @@ export function ExpenseChatShell() {
     const value = prompt.trim()
 
     if (chipMode) {
-      const userIntent = value.length > 0 || safeActiveChipIndex >= 0
-      if (userIntent && activeChipSuggestion) {
+      // Add the focused chip only when the user is actively filtering
+      // (i.e. has typed something). Otherwise, prioritize submitting the
+      // chips they've already added so arrow-key focus doesn't hijack send.
+      if (value.length > 0 && activeChipSuggestion) {
         addChip(activeChipSuggestion)
         const remaining = selectableIndices.filter(
           (i) => i !== safeActiveChipIndex
