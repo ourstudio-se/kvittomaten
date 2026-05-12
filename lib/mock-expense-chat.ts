@@ -22,6 +22,7 @@ export type ExpenseMessage =
   | { id: string; role: "assistant"; type: "quick-reply"; body: string; options: string[] }
   | { id: string; role: "assistant"; type: "category-picker"; body: string; suggested: string; categories: string[] }
   | { id: string; role: "assistant"; type: "participant-input"; body: string }
+  | { id: string; role: "assistant"; type: "participant-picker" }
   | { id: string; role: "assistant"; type: "line-items"; items: LineItem[] }
   | {
       id: string

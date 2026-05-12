@@ -1,8 +1,9 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ArrowUp, Camera, FileText, Paperclip, X } from "lucide-react"
+import { ArrowUp, Camera, FileText, Paperclip, Plus, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { ParticipantSheet } from "@/components/ui/participant-sheet"
 import { FloatingNav } from "@/components/ui/floating-nav"
 import {
   ChainOfThought,
@@ -152,6 +153,7 @@ export function ExpenseChatShell() {
   const kategoriConfirmedRef = useRef(false)
   const deltagareSkippedRef = useRef(false)
   const [deltagareOptional, setDeltagareOptional] = useState(false)
+  const [participantSheetOpen, setParticipantSheetOpen] = useState(false)
 
   const [hasCamera, setHasCamera] = useState(false)
   const cameraInputRef = useRef<HTMLInputElement>(null)
@@ -201,6 +203,7 @@ export function ExpenseChatShell() {
     kategoriConfirmedRef.current = false
     deltagareSkippedRef.current = false
     setDeltagareOptional(false)
+    setParticipantSheetOpen(false)
     receiptImagesRef.current = []
     pendingReceiptImageRef.current = null
     setIsProcessing(false)
@@ -391,8 +394,10 @@ export function ExpenseChatShell() {
       addMessage({ id: uid(), role: "assistant", type: "text", body })
       setChipMode(true)
       setSelectedChips([])
-      showSuggestions(EMPLOYEES, () => {})
-      setPendingAction(() => (value: string) => acceptAnswer("deltagare", value, value))
+      showSuggestions([], (value: string) => acceptAnswer("deltagare", value, value))
+      if (category === "Representation, intern") {
+        setParticipantSheetOpen(true)
+      }
     }
 
     function next() {
@@ -965,6 +970,12 @@ export function ExpenseChatShell() {
         setActiveChipIndex(next)
         return
       }
+      // No matching suggestion (e.g. picker-driven flow): treat the typed
+      // value as a custom chip so users can add names outside the list.
+      if (value.length > 0 && suggestions.length === 0) {
+        addChip(value)
+        return
+      }
       if (selectedChips.length === 0) return
       const joined = selectedChips.join(", ")
       pendingAction?.(joined)
@@ -1033,6 +1044,7 @@ export function ExpenseChatShell() {
     addChip,
     safeActiveChipIndex,
     selectableIndices,
+    suggestions,
   ])
 
   // --- Edit / Submit ---
@@ -1173,7 +1185,7 @@ export function ExpenseChatShell() {
         <section className="relative flex min-h-0 flex-1 flex-col">
           <div className="flex min-h-0 flex-1">
             <ChatContainerRoot className="h-full w-full">
-              <ChatContainerContent className="mx-auto w-full max-w-[800px] space-y-between-cards px-screen-edge pt-10 pb-44 lg:px-8 lg:pb-32">
+              <ChatContainerContent className="mx-auto w-full max-w-[800px] space-y-between-cards px-screen-edge pt-10 pb-6 lg:px-8">
                   {messages.map((message) => {
                     if (message.type === "text") {
                       return (
@@ -1325,9 +1337,7 @@ export function ExpenseChatShell() {
             </ChatContainerRoot>
           </div>
 
-          <div className="pointer-events-none fixed inset-x-0 bottom-0 h-40 bg-gradient-to-t from-background via-background/92 to-transparent" />
-
-          <footer className="fixed inset-x-0 bottom-0 px-screen-edge pb-[max(1.5rem,env(safe-area-inset-bottom))] lg:px-8">
+          <footer className="relative shrink-0 px-screen-edge pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-2 lg:px-8">
             <div className="mx-auto max-w-[800px]">
               {suggestions.length > 0 && (
                 <div className="relative mb-2">
@@ -1389,7 +1399,7 @@ export function ExpenseChatShell() {
                   </div>
                 )}
 
-                {chipMode && selectedChips.length > 0 && (
+                {chipMode && (
                   <div className="mb-2 flex flex-wrap gap-1.5">
                     {selectedChips.map((chip) => (
                       <span
@@ -1406,6 +1416,14 @@ export function ExpenseChatShell() {
                         </button>
                       </span>
                     ))}
+                    <button
+                      type="button"
+                      onClick={() => setParticipantSheetOpen(true)}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-border px-3 py-1 text-sm text-muted-foreground hover:border-primary/50 hover:bg-accent hover:text-foreground"
+                    >
+                      <Plus className="size-3.5" />
+                      Lägg till deltagare
+                    </button>
                     {selectedChips.length >= 5 && (
                       <button
                         type="button"
@@ -1449,7 +1467,7 @@ export function ExpenseChatShell() {
                   onKeyDown={handleChipKeyDown}
                   placeholder={
                     chipMode
-                      ? "Filtrera anställda…"
+                      ? "Lägg till annan deltagare…"
                       : pendingAction
                       ? "Välj ett alternativ ovan eller skriv ett eget svar…"
                       : "Beskriv vad som ska granskas eller ladda upp ett underlag…"
@@ -1494,6 +1512,14 @@ export function ExpenseChatShell() {
           </footer>
         </section>
       </div>
+
+      <ParticipantSheet
+        open={participantSheetOpen}
+        onClose={() => setParticipantSheetOpen(false)}
+        employees={EMPLOYEES}
+        selected={selectedChips}
+        onChange={setSelectedChips}
+      />
 
       <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileChange} />
       <input
