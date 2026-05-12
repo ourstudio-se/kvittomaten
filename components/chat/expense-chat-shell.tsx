@@ -185,6 +185,15 @@ export function ExpenseChatShell() {
       .catch(() => setHasCamera(false))
   }, [])
 
+  // Drop keyboard focus when the deltagare picker takes over — the user
+  // typically uses the sheet/chips, so the textarea shouldn't auto-pop the
+  // keyboard. They can still tap it to type a custom name.
+  useEffect(() => {
+    if (!chipMode) return
+    const el = document.activeElement
+    if (el instanceof HTMLElement) el.blur()
+  }, [chipMode])
+
   // Track the visual viewport so the chat shell follows the on-screen keyboard
   // on iOS (where `dvh`/`interactive-widget` don't react to keyboard).
   useEffect(() => {
@@ -992,6 +1001,10 @@ export function ExpenseChatShell() {
 
   const handlePromptSubmit = useCallback(() => {
     const value = prompt.trim()
+    const blurInput = () => {
+      const el = document.activeElement
+      if (el instanceof HTMLElement) el.blur()
+    }
 
     if (chipMode) {
       // Add the focused chip only when the user is actively filtering
@@ -1017,6 +1030,7 @@ export function ExpenseChatShell() {
       }
       if (selectedChips.length === 0) return
       const joined = selectedChips.join(", ")
+      blurInput()
       pendingAction?.(joined)
       return
     }
@@ -1026,6 +1040,7 @@ export function ExpenseChatShell() {
       // would otherwise swallow the input.
       if (/^(avbryt|ångra|fel kvitto|glöm det|börja om)\.?$/i.test(value)) {
         setPrompt("")
+        blurInput()
         addMessage({ id: uid(), role: "user", type: "text", body: value })
         cancelCurrentFlow()
         return
@@ -1036,11 +1051,13 @@ export function ExpenseChatShell() {
       const expected = expectedFieldRef.current
       if (expected && shouldRouteToIntent(value, expected)) {
         setPrompt("")
+        blurInput()
         void handleIntent(value, { expectingField: expected })
         return
       }
       pendingAction(value)
       setPrompt("")
+      blurInput()
       return
     }
 
@@ -1050,6 +1067,7 @@ export function ExpenseChatShell() {
         type: file.type,
       })
       setPrompt("")
+      blurInput()
       clearAttachment()
       void startScanFlow(file)
       return
@@ -1057,6 +1075,7 @@ export function ExpenseChatShell() {
 
     if (value) {
       setPrompt("")
+      blurInput()
       const hasReceiptInProgress =
         Object.values(extractedRef.current).some((v) => v != null)
       const hasSavedReceipts = collectedReceiptsRef.current.length > 0
