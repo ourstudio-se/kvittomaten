@@ -192,7 +192,6 @@ export function ExpenseChatShell() {
     if (!vv) return
     const root = document.documentElement
     const apply = () => {
-      root.style.setProperty("--app-height", `${vv.height}px`)
       const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
       root.style.setProperty("--kb-inset", `${inset}px`)
     }
@@ -202,7 +201,6 @@ export function ExpenseChatShell() {
     return () => {
       vv.removeEventListener("resize", apply)
       vv.removeEventListener("scroll", apply)
-      root.style.removeProperty("--app-height")
       root.style.removeProperty("--kb-inset")
     }
   }, [])
@@ -1200,7 +1198,7 @@ export function ExpenseChatShell() {
 
   return (
     <main
-      className="grain h-[var(--app-height,100dvh)] overflow-hidden bg-background"
+      className="grain fixed inset-0 overflow-hidden bg-background"
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -1221,7 +1219,10 @@ export function ExpenseChatShell() {
           </div>
         </div>
       )}
-      <div className="relative flex h-[var(--app-height,100dvh)] flex-col overflow-hidden">
+      <div
+        className="relative flex h-full flex-col overflow-hidden"
+        style={{ paddingBottom: "var(--kb-inset, 0px)" }}
+      >
         <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-primary/12 to-transparent" />
 
         <section className="relative flex min-h-0 flex-1 flex-col">
