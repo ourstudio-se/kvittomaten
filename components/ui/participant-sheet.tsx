@@ -57,7 +57,10 @@ function SheetBody({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8"
+      style={{ paddingBottom: "max(1rem, var(--kb-inset, 0px))" }}
+    >
       <div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-in fade-in-0"
         onClick={onClose}
@@ -69,7 +72,8 @@ function SheetBody({
         aria-label={title}
         className={cn(
           "relative flex w-full max-w-[640px] flex-col",
-          "h-[80dvh] sm:h-[min(80dvh,720px)]",
+          "h-[min(80dvh,calc(100dvh-var(--kb-inset,0px)-2rem))]",
+          "sm:h-[min(80dvh,720px,calc(100dvh-var(--kb-inset,0px)-4rem))]",
           "rounded-sm border border-border bg-card shadow-2xl overflow-hidden",
           "animate-in fade-in-0 zoom-in-95 duration-150"
         )}
