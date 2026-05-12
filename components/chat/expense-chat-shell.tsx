@@ -1600,7 +1600,7 @@ export function ExpenseChatShell() {
                       chipMode
                         ? "Lägg till annan deltagare…"
                         : pendingAction
-                        ? "Välj ett alternativ ovan eller skriv ett eget svar…"
+                        ? "Välj ett alternativ"
                         : "Skriv här…"
                     }
                     className="flex-1 py-2 text-base leading-6 text-foreground placeholder:text-muted-foreground"
