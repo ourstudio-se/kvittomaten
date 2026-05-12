@@ -185,6 +185,28 @@ export function ExpenseChatShell() {
       .catch(() => setHasCamera(false))
   }, [])
 
+  // Track the visual viewport so the chat shell follows the on-screen keyboard
+  // on iOS (where `dvh`/`interactive-widget` don't react to keyboard).
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    const root = document.documentElement
+    const apply = () => {
+      root.style.setProperty("--app-height", `${vv.height}px`)
+      const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
+      root.style.setProperty("--kb-inset", `${inset}px`)
+    }
+    apply()
+    vv.addEventListener("resize", apply)
+    vv.addEventListener("scroll", apply)
+    return () => {
+      vv.removeEventListener("resize", apply)
+      vv.removeEventListener("scroll", apply)
+      root.style.removeProperty("--app-height")
+      root.style.removeProperty("--kb-inset")
+    }
+  }, [])
+
   const addMessage = useCallback((msg: ExpenseMessage) => {
     setMessages((prev) => [...prev, msg])
   }, [])
@@ -1178,7 +1200,7 @@ export function ExpenseChatShell() {
 
   return (
     <main
-      className="grain min-h-dvh overflow-hidden bg-background"
+      className="grain h-[var(--app-height,100dvh)] overflow-hidden bg-background"
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -1199,7 +1221,7 @@ export function ExpenseChatShell() {
           </div>
         </div>
       )}
-      <div className="relative flex h-dvh flex-col overflow-hidden">
+      <div className="relative flex h-[var(--app-height,100dvh)] flex-col overflow-hidden">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-primary/12 to-transparent" />
 
         <section className="relative flex min-h-0 flex-1 flex-col">
