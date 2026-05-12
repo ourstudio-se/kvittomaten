@@ -23,7 +23,6 @@ import {
 } from "@/components/ui/message"
 import {
   PromptInput,
-  PromptInputActions,
   PromptInputTextarea,
 } from "@/components/ui/prompt-input"
 import { PromptSuggestion } from "@/components/ui/prompt-suggestion"
@@ -156,8 +155,28 @@ export function ExpenseChatShell() {
   const [participantSheetOpen, setParticipantSheetOpen] = useState(false)
 
   const [hasCamera, setHasCamera] = useState(false)
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false)
+  const attachMenuRef = useRef<HTMLDivElement>(null)
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!attachMenuOpen) return
+    const onPointerDown = (e: PointerEvent) => {
+      if (!attachMenuRef.current?.contains(e.target as Node)) {
+        setAttachMenuOpen(false)
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setAttachMenuOpen(false)
+    }
+    window.addEventListener("pointerdown", onPointerDown)
+    window.addEventListener("keydown", onKey)
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown)
+      window.removeEventListener("keydown", onKey)
+    }
+  }, [attachMenuOpen])
 
   useEffect(() => {
     navigator.mediaDevices
@@ -1155,6 +1174,7 @@ export function ExpenseChatShell() {
   // --- Render ---
 
   const canSend = !!attachedFile || !!prompt.trim()
+  const isPromptExpanded = !!attachedFile || chipMode || prompt.includes("\n")
 
   return (
     <main
@@ -1328,7 +1348,6 @@ export function ExpenseChatShell() {
                     </Message>
                   )}
 
-                  {suggestions.length > 0 && <div aria-hidden className="h-[65vh]" />}
                   <ChatContainerScrollAnchor />
                 </ChatContainerContent>
                 <div className="pointer-events-none fixed inset-x-0 bottom-44 z-10 flex justify-end px-screen-edge lg:px-8">
@@ -1341,10 +1360,6 @@ export function ExpenseChatShell() {
             <div className="mx-auto max-w-[800px]">
               {suggestions.length > 0 && (
                 <div className="relative mb-2">
-                  <div
-                    aria-hidden
-                    className="pointer-events-none absolute -left-[100vw] -right-[100vw] -top-24 -bottom-2 bg-gradient-to-t from-background via-background/90 to-transparent"
-                  />
                   <div className="relative flex flex-wrap gap-2 px-1 py-1">
                     {filteredSuggestions.map((s, idx) => {
                       const isSelected = chipMode && selectedChips.includes(s)
@@ -1385,10 +1400,10 @@ export function ExpenseChatShell() {
                 value={prompt}
                 onValueChange={handlePromptChange}
                 onSubmit={handlePromptSubmit}
-                className="rounded-md border-border/80 bg-background/70 px-4 py-3 shadow-none backdrop-blur-xl"
+                className={`${isPromptExpanded ? "!rounded-xl" : "!rounded-2xl"} border-border/80 bg-background/70 p-1 shadow-none backdrop-blur-xl transition-[border-radius] duration-150`}
               >
                 {chipMode && deltagareOptional && (
-                  <div className="mb-2">
+                  <div className="mx-2 mt-2">
                     <button
                       type="button"
                       onClick={handleSkipDeltagare}
@@ -1400,7 +1415,7 @@ export function ExpenseChatShell() {
                 )}
 
                 {chipMode && (
-                  <div className="mb-2 flex flex-wrap gap-1.5">
+                  <div className="mx-2 mt-2 flex flex-wrap gap-1.5">
                     {selectedChips.map((chip) => (
                       <span
                         key={chip}
@@ -1438,7 +1453,7 @@ export function ExpenseChatShell() {
                 )}
 
                 {attachedFile && (
-                  <div className="mb-2">
+                  <div className="mx-2 mt-2">
                     <div className="inline-flex items-center gap-2 rounded-md border border-border bg-muted/60 px-3 py-2 pr-2">
                       {attachedPreviewUrl ? (
                         <img
@@ -1463,43 +1478,73 @@ export function ExpenseChatShell() {
                   </div>
                 )}
 
-                <PromptInputTextarea
-                  onKeyDown={handleChipKeyDown}
-                  placeholder={
-                    chipMode
-                      ? "Lägg till annan deltagare…"
-                      : pendingAction
-                      ? "Välj ett alternativ ovan eller skriv ett eget svar…"
-                      : "Beskriv vad som ska granskas eller ladda upp ett underlag…"
-                  }
-                  className="max-w-3xl flex-1 text-base leading-7 text-foreground placeholder:text-muted-foreground"
-                />
-
-                <div className="mt-2 flex flex-row items-center justify-between gap-4">
-                  <PromptInputActions>
+                <div className="flex flex-row items-center gap-2">
+                  <div className="relative my-2 ml-2 shrink-0" ref={attachMenuRef}>
                     <Button
-                      variant="ghost"
+                      variant="secondary"
                       size="icon-lg"
                       className="rounded-full"
-                      aria-label="Ladda upp fil"
+                      aria-label="Bifoga"
+                      aria-haspopup="menu"
+                      aria-expanded={attachMenuOpen}
                       disabled={isProcessing}
-                      onClick={() => fileInputRef.current?.click()}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setAttachMenuOpen((v) => !v)
+                      }}
                     >
-                      <Paperclip className="size-4" />
+                      <Plus className="size-4" />
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon-lg"
-                      className="rounded-full"
-                      aria-label="Ta bild"
-                      disabled={!hasCamera || isProcessing}
-                      onClick={() => cameraInputRef.current?.click()}
-                    >
-                      <Camera className="size-4" />
-                    </Button>
-                  </PromptInputActions>
+                    {attachMenuOpen && (
+                      <div
+                        role="menu"
+                        className="absolute bottom-full left-0 z-20 mb-2 min-w-44 overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-md"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground"
+                          onClick={() => {
+                            setAttachMenuOpen(false)
+                            fileInputRef.current?.click()
+                          }}
+                        >
+                          <Paperclip className="size-4" />
+                          Ladda upp fil
+                        </button>
+                        {hasCamera && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground"
+                            onClick={() => {
+                              setAttachMenuOpen(false)
+                              cameraInputRef.current?.click()
+                            }}
+                          >
+                            <Camera className="size-4" />
+                            Ta bild
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <PromptInputTextarea
+                    onKeyDown={handleChipKeyDown}
+                    placeholder={
+                      chipMode
+                        ? "Lägg till annan deltagare…"
+                        : pendingAction
+                        ? "Välj ett alternativ ovan eller skriv ett eget svar…"
+                        : "Skriv här…"
+                    }
+                    className="flex-1 py-2 text-base leading-6 text-foreground placeholder:text-muted-foreground"
+                  />
+
                   <Button
-                    className="size-10 rounded-full p-0"
+                    className="my-2 mr-2 size-10 shrink-0 rounded-full p-0"
                     aria-label="Skicka"
                     disabled={chipMode ? selectedChips.length === 0 : (!canSend && !pendingAction)}
                     onClick={handlePromptSubmit}

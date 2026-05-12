@@ -1,4 +1,4 @@
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 import { IBM_Plex_Mono, Inter } from "next/font/google"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import "./globals.css"
@@ -17,6 +17,13 @@ const ibmPlexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "Expense AI Chat",
   description: "UI shell for an expense interpretation assistant."
+}
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  interactiveWidget: "resizes-content",
 }
 
 export default function RootLayout({
