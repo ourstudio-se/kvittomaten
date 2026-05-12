@@ -1002,8 +1002,14 @@ export function ExpenseChatShell() {
   const handlePromptSubmit = useCallback(() => {
     const value = prompt.trim()
     const blurInput = () => {
-      const el = document.activeElement
-      if (el instanceof HTMLElement) el.blur()
+      // PromptInput's root onClick refocuses the textarea after a click on
+      // the send button, so defer the blur to the next frame to outlive it.
+      const doBlur = () => {
+        const el = document.activeElement
+        if (el instanceof HTMLElement) el.blur()
+      }
+      doBlur()
+      requestAnimationFrame(doBlur)
     }
 
     if (chipMode) {
@@ -1445,10 +1451,13 @@ export function ExpenseChatShell() {
                 className={`${isPromptExpanded ? "!rounded-xl" : "!rounded-2xl"} border-border/80 bg-background/70 p-1 shadow-none backdrop-blur-xl transition-[border-radius] duration-150`}
               >
                 {chipMode && deltagareOptional && (
-                  <div className="mx-2 mt-2">
+                  <div className="mx-2 mt-2" onClick={(e) => e.stopPropagation()}>
                     <button
                       type="button"
-                      onClick={handleSkipDeltagare}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleSkipDeltagare()
+                      }}
                       className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-border px-3 py-1 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
                     >
                       Hoppa över deltagare
@@ -1457,7 +1466,10 @@ export function ExpenseChatShell() {
                 )}
 
                 {chipMode && (
-                  <div className="mx-2 mt-2 flex flex-wrap gap-1.5">
+                  <div
+                    className="mx-2 mt-2 flex flex-wrap gap-1.5"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     {selectedChips.map((chip) => (
                       <span
                         key={chip}
@@ -1465,7 +1477,10 @@ export function ExpenseChatShell() {
                       >
                         {chip}
                         <button
-                          onClick={() => removeChip(chip)}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            removeChip(chip)
+                          }}
                           className="text-muted-foreground hover:text-foreground"
                           aria-label={`Ta bort ${chip}`}
                         >
@@ -1475,7 +1490,10 @@ export function ExpenseChatShell() {
                     ))}
                     <button
                       type="button"
-                      onClick={() => setParticipantSheetOpen(true)}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setParticipantSheetOpen(true)
+                      }}
                       className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-border px-3 py-1 text-sm text-muted-foreground hover:border-primary/50 hover:bg-accent hover:text-foreground"
                     >
                       <Plus className="size-3.5" />
@@ -1484,7 +1502,10 @@ export function ExpenseChatShell() {
                     {selectedChips.length >= 5 && (
                       <button
                         type="button"
-                        onClick={() => setSelectedChips([])}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setSelectedChips([])
+                        }}
                         className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-border px-3 py-1 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
                       >
                         <X className="size-3" />
@@ -1589,7 +1610,10 @@ export function ExpenseChatShell() {
                     className="my-2 mr-2 size-10 shrink-0 rounded-full p-0"
                     aria-label="Skicka"
                     disabled={chipMode ? selectedChips.length === 0 : (!canSend && !pendingAction)}
-                    onClick={handlePromptSubmit}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handlePromptSubmit()
+                    }}
                   >
                     <ArrowUp className="size-5" />
                   </Button>
