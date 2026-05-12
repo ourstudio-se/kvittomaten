@@ -35,7 +35,7 @@ export type ChatContainerScrollAnchorProps = {
 
 function ChatContainerRoot({ children, className }: ChatContainerRootProps) {
   const { scrollRef, contentRef, isAtBottom, scrollToBottom } = useStickToBottom({
-    resize: "smooth",
+    resize: { damping: 0.8, stiffness: 0.04, mass: 1.4 },
     initial: "instant",
   })
 
