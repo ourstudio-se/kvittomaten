@@ -1561,7 +1561,7 @@ export function ExpenseChatShell() {
                     {attachMenuOpen && (
                       <div
                         role="menu"
-                        className="absolute bottom-full left-0 z-20 mb-2 min-w-44 overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-md"
+                        className="absolute bottom-full left-0 z-20 mb-2 min-w-44 overflow-hidden rounded-sm border border-border bg-popover text-popover-foreground shadow-md"
                         onClick={(e) => e.stopPropagation()}
                       >
                         <button
