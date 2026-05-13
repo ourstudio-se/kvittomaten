@@ -1223,7 +1223,7 @@ export function ExpenseChatShell() {
 
   return (
     <main
-      className="grain min-h-dvh overflow-hidden bg-background"
+      className="grain h-dvh overflow-hidden bg-background"
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}

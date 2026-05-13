@@ -142,6 +142,11 @@
     box-sizing: border-box;
   }
 
+  html,
+  body {
+    overscroll-behavior: none;
+  }
+
   body {
     @apply bg-background text-foreground;
     margin: 0;
