@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/prompt-input"
 import { PromptSuggestion } from "@/components/ui/prompt-suggestion"
 import { ScrollButton } from "@/components/ui/scroll-button"
-import { Loader } from "@/components/ui/loader"
+import { ThinkingBar } from "@/components/ui/thinking-bar"
 import { ScanningCard } from "@/components/ui/scanning-card"
 import { SummaryCard } from "@/components/ui/summary-card"
 import {
@@ -123,6 +123,43 @@ const GENERATION_STEPS: GeneratingStep[] = [
   { label: "Formaterar kvittodokument", status: "pending" },
   { label: "Genererar PDF", status: "pending" },
 ]
+
+const THINKING_PHRASES = [
+  "Tänker",
+  "Knäcker siffror",
+  "Letar efter momsen",
+  "Räknar ören",
+  "Sorterar utlägg",
+  "Pratar med bokföringsnissarna",
+  "Frågar Skatteverket snällt",
+  "Doppar kvittot i Gemini",
+  "Letar efter org.numret",
+  "Damm­torkar kalkylatorn",
+  "Översätter kassakvitto till svenska",
+  "Funderar på representation",
+  "Räknar deltagare",
+  "Kollar om det är avdragsgillt",
+  "Hojtar på revisorn",
+]
+
+function ThinkingIndicator() {
+  const [phrase, setPhrase] = useState(
+    () => THINKING_PHRASES[Math.floor(Math.random() * THINKING_PHRASES.length)]
+  )
+  useEffect(() => {
+    const id = setInterval(() => {
+      setPhrase((current) => {
+        let next = current
+        while (next === current && THINKING_PHRASES.length > 1) {
+          next = THINKING_PHRASES[Math.floor(Math.random() * THINKING_PHRASES.length)]
+        }
+        return next
+      })
+    }, 2400)
+    return () => clearInterval(id)
+  }, [])
+  return <ThinkingBar text={`${phrase}…`} />
+}
 
 export function ExpenseChatShell() {
   const [prompt, setPrompt] = useState("")
@@ -1453,7 +1490,7 @@ export function ExpenseChatShell() {
                         className="mt-1 h-8 w-8 border border-border/70 bg-secondary text-secondary-foreground"
                       />
                       <div className="flex items-center px-1 py-2 text-muted-foreground">
-                        <Loader variant="terminal" />
+                        <ThinkingIndicator />
                       </div>
                     </Message>
                   )}
@@ -1510,7 +1547,7 @@ export function ExpenseChatShell() {
                 value={prompt}
                 onValueChange={handlePromptChange}
                 onSubmit={handlePromptSubmit}
-                className={`${isPromptExpanded ? "rounded-lg!" : "rounded-2xl!"} border-border/80 bg-background/70 p-1 shadow-none backdrop-blur-xl transition-[border-radius] duration-150`}
+                className={`${isPromptExpanded ? "rounded-lg!" : "rounded-2xl!"} border-border/80 bg-background/70 p-1 shadow-none backdrop-blur-xl transition-[border-radius] duration-300 ease-out`}
               >
                 {chipMode && (
                   <div

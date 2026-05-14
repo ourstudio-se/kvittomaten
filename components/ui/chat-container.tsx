@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useMemo } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from "react"
 import { useStickToBottom } from "use-stick-to-bottom"
 import { cn } from "@/lib/utils"
 
@@ -39,7 +39,37 @@ function ChatContainerRoot({ children, className }: ChatContainerRootProps) {
     initial: "instant",
   })
 
-  const ctx = useMemo(() => ({ isAtBottom, scrollToBottom }), [isAtBottom, scrollToBottom])
+  const scrollElRef = scrollRef as unknown as { current: HTMLElement | null }
+  const isAtBottomRef = useRef(isAtBottom)
+  isAtBottomRef.current = isAtBottom
+
+  const handleScrollToBottom = useCallback(() => {
+    scrollToBottom()
+    const el = scrollElRef.current
+    if (el) {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [scrollToBottom, scrollElRef])
+
+  // Stick to bottom when the scroll viewport itself shrinks (e.g. footer/input
+  // grows after attaching a file). useStickToBottom only observes content, not
+  // the viewport, so we patch that here.
+  useEffect(() => {
+    const el = scrollElRef.current
+    if (!el || typeof ResizeObserver === "undefined") return
+    const ro = new ResizeObserver(() => {
+      if (isAtBottomRef.current) {
+        el.scrollTop = el.scrollHeight
+      }
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [scrollElRef])
+
+  const ctx = useMemo(
+    () => ({ isAtBottom, scrollToBottom: handleScrollToBottom }),
+    [isAtBottom, handleScrollToBottom]
+  )
 
   return (
     <ChatScrollContext.Provider value={ctx}>
