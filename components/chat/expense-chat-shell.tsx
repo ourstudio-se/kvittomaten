@@ -365,9 +365,100 @@ export function ExpenseChatShell() {
       showSuggestions([], (value) => acceptAnswer(key, value, value))
     }
 
+    const handleCategoryPick = (raw: string) => {
+      kategoriConfirmedRef.current = true
+      if (CATEGORIES.includes(raw)) {
+        // Representation kräver alltid att deltagare anges — rensa eventuellt
+        // AI-extraherat värde så deltagare-prompten alltid kör.
+        if (raw.startsWith("Representation")) {
+          extractedRef.current = { ...extractedRef.current, deltagare: undefined }
+          deltagareSkippedRef.current = false
+        }
+        acceptAnswer("kategori", raw, raw)
+      } else {
+        // Free-text → Övrigt with the typed description as fritext (so we
+        // don't re-prompt for fritext on the next step).
+        expectedFieldRef.current = null
+        addMessage({
+          id: uid(),
+          role: "user",
+          type: "text",
+          body: `Övrigt – ${raw}`,
+        })
+        clearSuggestions()
+        extractedRef.current = {
+          ...extractedRef.current,
+          kategori: "Övrigt",
+          fritext: raw,
+        }
+        pushProgressCard()
+        setTimeout(next, 400)
+      }
+    }
+
     const promptKategori = () => {
       expectedFieldRef.current = "kategori"
       const suggested = extractedRef.current.kategori
+      const isRepSuggestion =
+        suggested === "Representation, intern" ||
+        suggested === "Representation, extern"
+
+      if (isRepSuggestion && suggested) {
+        addMessage({
+          id: uid(),
+          role: "assistant",
+          type: "text",
+          body: `Jag antar att det är **${suggested}**. Lägg till deltagare för att fortsätta, eller välj en annan kategori.`,
+        })
+        showSuggestions(["Lägg till deltagare", "Ändra kategori"], (raw) => {
+          if (raw === "Lägg till deltagare") {
+            // Confirm the suggested representation category and wipe any
+            // AI-extracted deltagare so the picker always asks fresh.
+            expectedFieldRef.current = null
+            addMessage({
+              id: uid(),
+              role: "user",
+              type: "text",
+              body: "Lägg till deltagare",
+            })
+            clearSuggestions()
+            kategoriConfirmedRef.current = true
+            extractedRef.current = {
+              ...extractedRef.current,
+              kategori: suggested,
+              deltagare: undefined,
+            }
+            deltagareSkippedRef.current = false
+            pushProgressCard()
+            setTimeout(next, 400)
+            return
+          }
+          // "Ändra kategori" → re-prompt with the full list (minus the
+          // suggestion the user just rejected). Defer so the outer chip-click
+          // handler's clearSuggestions doesn't wipe the new options.
+          addMessage({
+            id: uid(),
+            role: "user",
+            type: "text",
+            body: "Ändra kategori",
+          })
+          setTimeout(() => {
+            expectedFieldRef.current = "kategori"
+            addMessage({
+              id: uid(),
+              role: "assistant",
+              type: "text",
+              body: "Vilken kategori passar bättre?",
+            })
+            showSuggestions(
+              CATEGORIES.filter((c) => c !== suggested),
+              handleCategoryPick
+            )
+          }, 300)
+        })
+        return
+      }
+
       const body = suggested
         ? `Jag antar att det är **${suggested}**. Stämmer det, eller vill du välja en annan kategori?`
         : "Vilken kategori passar utlägget? Välj från listan eller skriv eget."
@@ -376,36 +467,7 @@ export function ExpenseChatShell() {
         suggested && CATEGORIES.includes(suggested)
           ? [suggested, ...CATEGORIES.filter((c) => c !== suggested)]
           : CATEGORIES
-      showSuggestions(options, (raw) => {
-        kategoriConfirmedRef.current = true
-        if (CATEGORIES.includes(raw)) {
-          // Representation kräver alltid att deltagare anges — rensa eventuellt
-          // AI-extraherat värde så deltagare-prompten alltid kör.
-          if (raw.startsWith("Representation")) {
-            extractedRef.current = { ...extractedRef.current, deltagare: undefined }
-            deltagareSkippedRef.current = false
-          }
-          acceptAnswer("kategori", raw, raw)
-        } else {
-          // Free-text → Övrigt with the typed description as fritext (so we
-          // don't re-prompt for fritext on the next step).
-          expectedFieldRef.current = null
-          addMessage({
-            id: uid(),
-            role: "user",
-            type: "text",
-            body: `Övrigt – ${raw}`,
-          })
-          clearSuggestions()
-          extractedRef.current = {
-            ...extractedRef.current,
-            kategori: "Övrigt",
-            fritext: raw,
-          }
-          pushProgressCard()
-          setTimeout(next, 400)
-        }
-      })
+      showSuggestions(options, handleCategoryPick)
     }
 
     const promptFritext = () => {
@@ -1448,23 +1510,8 @@ export function ExpenseChatShell() {
                 value={prompt}
                 onValueChange={handlePromptChange}
                 onSubmit={handlePromptSubmit}
-                className={`${isPromptExpanded ? "!rounded-xl" : "!rounded-2xl"} border-border/80 bg-background/70 p-1 shadow-none backdrop-blur-xl transition-[border-radius] duration-150`}
+                className={`${isPromptExpanded ? "rounded-lg!" : "rounded-2xl!"} border-border/80 bg-background/70 p-1 shadow-none backdrop-blur-xl transition-[border-radius] duration-150`}
               >
-                {chipMode && deltagareOptional && (
-                  <div className="mx-2 mt-2" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleSkipDeltagare()
-                      }}
-                      className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-border px-3 py-1 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-                    >
-                      Hoppa över deltagare
-                    </button>
-                  </div>
-                )}
-
                 {chipMode && (
                   <div
                     className="mx-2 mt-2 flex flex-wrap gap-1.5"
@@ -1499,6 +1546,18 @@ export function ExpenseChatShell() {
                       <Plus className="size-3.5" />
                       Lägg till deltagare
                     </button>
+                    {deltagareOptional && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleSkipDeltagare()
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-border px-3 py-1 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                      >
+                        Hoppa över
+                      </button>
+                    )}
                     {selectedChips.length >= 5 && (
                       <button
                         type="button"
