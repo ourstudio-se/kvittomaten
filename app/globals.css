@@ -145,12 +145,13 @@
   html,
   body {
     overscroll-behavior: none;
+    height: 100%;
+    overflow: hidden;
   }
 
   body {
     @apply bg-background text-foreground;
     margin: 0;
-    min-height: 100dvh;
     font-family: var(--font-sans);
     letter-spacing: var(--tracking-normal);
     line-height: 1.6;
